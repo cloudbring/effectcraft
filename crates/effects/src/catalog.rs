@@ -93,9 +93,36 @@ const CPU_ONLY_CONTROLS: &[(&str, &[&str])] = &[
 
 /// Whether the GPU kernel of effect `id` covers the instance's current settings (see
 /// `CPU_ONLY_CONTROLS`; plus Cell Pattern's HQ variants, Turbulent Displace's locked
-/// pinning and CC Particle World's motion trails and textured squares).
+/// pinning and CC Particle World's motion trails and textured squares). Effects using the
+/// shared variance-exact RGBA Gaussian render on the CPU until the GPU implements that kernel;
+/// the separate scalar-plane box approximation and explicit Fast Box Blur remain on the GPU.
 pub fn gpu_supported(id: &str, ctx: &crate::EffectCtx) -> bool {
     match id {
+        "ec.blur.gaussian" | "ec.obsolete.gaussianlegacy" if !ctx.env.legacy_gaussian_blur => return false,
+        "ec.blur.sharpen"
+        | "ec.blur.unsharp"
+        | "ec.blur.compound"
+        | "ec.blur.reduceflicker"
+        | "ec.3d.depthoffield"
+        | "ec.perspective.ccenvironment"
+        | "ec.perspective.radialshadow"
+        | "ec.perspective.dropshadow"
+        | "ec.stylize.glow"
+        | "ec.stylize.cartoon"
+        | "ec.distort.upscale"
+        | "ec.key.differencematte"
+        | "ec.key.screen"
+        | "ec.key.keycleaner"
+        | "ec.keying.keylight"
+        | "ec.matte.simplechoker"
+        | "ec.matte.mattechoker"
+        | "ec.matte.refinesoft"
+        | "ec.matte.refinehard"
+        | "ec.sim.caustics"
+            if !ctx.env.legacy_gaussian_blur =>
+        {
+            return false;
+        }
         "ec.generate.cellpattern" if (6..=10).contains(&ctx.params.e("cellPattern")) => return false,
         "ec.distort.turbulentdisplace" if ctx.params.e("pinning") >= 8 => return false,
         // #1195: CC Particle World's motion trails (the averaged shutter samples) render on the
@@ -173,6 +200,18 @@ pub fn effects_markdown() -> String {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn shared_gaussian_effects_do_not_run_the_old_gpu_boxes() {
+        for id in ["ec.blur.gaussian", "ec.obsolete.gaussianlegacy", "ec.stylize.glow", "ec.sim.caustics", "ec.matte.simplechoker"] {
+            let spec = crate::find(id).unwrap();
+            let params = crate::Params { values: spec.params.iter().map(|param| (param.id.to_string(), crate::default_value(param, [100.0; 2]))).collect() };
+            let mut ctx = crate::EffectCtx { params: &params, time: 0.0, layer_size: [100.0; 2], seed: 0, adjustment: false, env: Default::default() };
+            assert!(!super::gpu_supported(id, &ctx), "{id}");
+            ctx.env.legacy_gaussian_blur = true;
+            assert!(super::gpu_supported(id, &ctx), "legacy {id}");
+        }
+    }
+
+    #[test]
     fn effects_doc_is_current() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/effects.md");
         let want = super::effects_markdown();
@@ -236,7 +275,8 @@ mod tests {
         assert!(!ok("ec.distort.turbulentdisplace", &[("pinning", Value::Enum(9))]));
         assert!(ok("ec.distort.ccpowerpin", &[]));
         assert!(!ok("ec.distort.ccpowerpin", &[("unstretch", Value::Bool(true))]));
-        assert!(ok("ec.blur.gaussian", &[]));
+        assert!(!ok("ec.blur.gaussian", &[]));
+        assert!(ok("ec.blur.fastbox", &[]));
     }
 
     #[test]

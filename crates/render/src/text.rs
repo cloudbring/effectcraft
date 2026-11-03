@@ -946,7 +946,13 @@ fn raster_pass(g: &PlacedGlyph, stroke: bool, paths: &[BezPath], m: &Mat3, rect:
         }
     }
     if blur_px[0] > 0.05 || blur_px[1] > 0.05 {
-        img = effectcraft_raster::gaussian_blur(&img, blur_px[0] / 2.0, blur_px[1] / 2.0, false);
+        img = effectcraft_raster::gaussian_blur_with_quality(
+            &img,
+            blur_px[0] / 2.0,
+            blur_px[1] / 2.0,
+            false,
+            effectcraft_raster::BlurQuality::BoxApprox { passes: 3 },
+        );
     }
     img
 }

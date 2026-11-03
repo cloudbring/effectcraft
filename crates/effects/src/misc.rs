@@ -3,7 +3,7 @@
 use effectcraft_color::luminance;
 use effectcraft_keyframe::Value;
 use effectcraft_project::ParamUi;
-use effectcraft_raster::{Image, gaussian_blur, hash_noise};
+use effectcraft_raster::{Image, hash_noise};
 use rayon::prelude::*;
 
 use crate::{Buf, EffectCtx, EffectSpec, col, num, p, popup, slider};
@@ -39,12 +39,7 @@ fn gaussian(ctx: &EffectCtx, mut b: Buf) -> Buf {
         b.cover(ctx.layer_size);
     }
     let (sx, sy) = (s * kx, s * ky);
-    // Small sigmas: integer-radius box passes would step (and do nothing below ~0.6 px), so sample the kernel (#1939).
-    b.img = if effectcraft_raster::gaussian_is_exact(sx, sy) {
-        effectcraft_raster::gaussian_blur_exact(&b.img, sx, sy, repeat || ctx.adjustment)
-    } else {
-        gaussian_blur(&b.img, sx, sy, repeat || ctx.adjustment)
-    };
+    b.img = ctx.gaussian_effect(&b.img, sx, sy, repeat || ctx.adjustment);
     b
 }
 
@@ -102,8 +97,8 @@ fn radial(ctx: &EffectCtx, mut b: Buf) -> Buf {
     b
 }
 
-fn unsharp_core(img: &Image, amount: f32, sigma: f64, threshold: f32) -> Image {
-    let blurred = gaussian_blur(img, sigma, sigma, true);
+fn unsharp_core(ctx: &EffectCtx, img: &Image, amount: f32, sigma: f64, threshold: f32) -> Image {
+    let blurred = ctx.gaussian_blur(img, sigma, sigma, true);
     let mut out = img.clone();
     out.data.par_iter_mut().zip(blurred.data.par_iter()).for_each(|(o, bl)| {
         for c in 0..3 {
@@ -118,13 +113,13 @@ fn unsharp_core(img: &Image, amount: f32, sigma: f64, threshold: f32) -> Image {
 
 fn sharpen(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let a = ctx.params.f("amount") as f32 / 50.0;
-    b.img = unsharp_core(&b.img, a, 1.0 * b.scale, 0.0);
+    b.img = unsharp_core(ctx, &b.img, a, 1.0 * b.scale, 0.0);
     b
 }
 
 fn unsharp(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let a = ctx.params.f("amount") as f32 / 100.0;
-    b.img = unsharp_core(&b.img, a, (ctx.params.f("radius") * b.scale).max(0.1), ctx.params.f("threshold") as f32);
+    b.img = unsharp_core(ctx, &b.img, a, (ctx.params.f("radius") * b.scale).max(0.1), ctx.params.f("threshold") as f32);
     b
 }
 
@@ -253,7 +248,8 @@ fn glow(ctx: &EffectCtx, mut b: Buf) -> Buf {
         }
     });
     let s = glow_sigma(radius);
-    let blurred = gaussian_blur(&bright, s * kx, s * ky, false);
+    let quality = if ctx.env.legacy_gaussian_blur { effectcraft_raster::BlurQuality::BoxApprox { passes: 3 } } else { effectcraft_raster::BlurQuality::Exact };
+    let blurred = effectcraft_raster::gaussian_blur_with_quality(&bright, s * kx, s * ky, false, quality);
     let mode = ctx.params.e("operation");
     b.img.data.par_iter_mut().zip(blurred.data.par_iter()).for_each(|(o, g)| {
         // Intensity scales the glow's colour; with the colour channels its coverage stays.
@@ -304,7 +300,7 @@ fn drop_shadow(ctx: &EffectCtx, mut b: Buf) -> Buf {
         }
     });
     if soft > 0.0 {
-        sh = gaussian_blur(&sh, soft / 2.0, soft / 2.0, false);
+        sh = ctx.gaussian_blur(&sh, soft / 2.0, soft / 2.0, false);
     }
     if !only {
         sh.data.par_iter_mut().zip(b.img.data.par_iter()).for_each(|(s, o)| {
@@ -888,6 +884,67 @@ mod tests {
     fn blurred_row(id: &str, param: &str, v: f64) -> Vec<f32> {
         let out = run_fx(id, &[(param, num(v)), ("repeatEdge", Value::Bool(true))], edge(), 0.0, EffectEnv::default());
         (16..24).map(|x| out.img.get(x, 4)[0]).collect()
+    }
+
+    #[test]
+    fn gaussian_effect_variance_and_project_compatibility() {
+        for sigma in [1.0_f64, 4.0, 16.0, 64.0] {
+            let extent = (32.0 * sigma).max(64.0) as u32;
+            let mut image = Image::new(2 * extent + 1, 1);
+            image.set(extent, 0, [1.0; 4]);
+            for legacy in [false, true] {
+                let output = run_fx(
+                    "ec.blur.gaussian",
+                    &[("blurriness", num(2.0 * sigma)), ("dimensions", Value::Enum(1)), ("repeatEdge", Value::Bool(true))],
+                    image.clone(),
+                    0.0,
+                    EffectEnv { legacy_gaussian_blur: legacy, ..Default::default() },
+                );
+                let mass: f64 = output.img.data.iter().map(|pixel| f64::from(pixel[3])).sum();
+                let variance =
+                    output.img.data.iter().enumerate().map(|(index, pixel)| (index as f64 - f64::from(extent)).powi(2) * f64::from(pixel[3])).sum::<f64>()
+                        / mass;
+                let expected = if legacy && sigma >= 3.0 { 1.0 - 1.0 / (3.0 * sigma) } else { 1.0 };
+                assert!((variance / sigma.powi(2) - expected).abs() < 0.005, "sigma {sigma}, legacy {legacy}: {variance}");
+            }
+        }
+    }
+
+    #[test]
+    fn auxiliary_gaussian_honors_project_compatibility() {
+        for sigma in [1.0_f64, 4.0, 16.0, 64.0] {
+            let extent = (32.0 * sigma).max(64.0) as u32;
+            let mut image = Image::new(1, 2 * extent + 1);
+            image.set(0, extent, [1.0; 4]);
+            for legacy in [false, true] {
+                let output = run_fx(
+                    "ec.blur.reduceflicker",
+                    &[("softness", num(sigma))],
+                    image.clone(),
+                    0.0,
+                    EffectEnv { legacy_gaussian_blur: legacy, ..Default::default() },
+                );
+                let mass: f64 = output.img.data.iter().map(|pixel| f64::from(pixel[3])).sum();
+                let variance =
+                    output.img.data.iter().enumerate().map(|(index, pixel)| (index as f64 - f64::from(extent)).powi(2) * f64::from(pixel[3])).sum::<f64>()
+                        / mass;
+                let expected = if legacy { 1.0 - 1.0 / (3.0 * sigma) } else { 1.0 };
+                assert!((variance / sigma.powi(2) - expected).abs() < 0.005, "sigma {sigma}, legacy {legacy}: {variance}");
+            }
+        }
+    }
+
+    #[test]
+    fn gaussian_dimensions_keep_the_inactive_axis_unchanged() {
+        let image = edge();
+        let vertical = run_fx(
+            "ec.blur.gaussian",
+            &[("blurriness", num(32.0)), ("dimensions", Value::Enum(2)), ("repeatEdge", Value::Bool(true))],
+            image.clone(),
+            0.0,
+            EffectEnv::default(),
+        );
+        assert_eq!(vertical.img, image);
     }
 
     #[test]

@@ -20,7 +20,7 @@ use std::sync::Arc;
 use effectcraft_keyframe::Value;
 use effectcraft_project::ParamUi;
 use effectcraft_raster::channels3d::{BACKGROUND_DEPTH, crypto_hash};
-use effectcraft_raster::{AuxChannels, Image, Px, gaussian_blur};
+use effectcraft_raster::{AuxChannels, Image, Px};
 use rayon::prelude::*;
 
 use crate::util::{Plane, gauss_plane, hash1, premul, unpremul};
@@ -198,7 +198,7 @@ fn depth_of_field(ctx: &EffectCtx, mut b: Buf) -> Buf {
         .into_par_iter()
         .map(|k| {
             let r = max_r * k as f32 / (LEVELS - 1) as f32;
-            if r < 0.3 { b.img.clone() } else { gaussian_blur(&b.img, (r / 2.0) as f64, (r / 2.0) as f64, true) }
+            if r < 0.3 { b.img.clone() } else { ctx.gaussian_blur(&b.img, (r / 2.0) as f64, (r / 2.0) as f64, true) }
         })
         .collect();
     b.img.data.par_iter_mut().enumerate().for_each(|(i, px)| {

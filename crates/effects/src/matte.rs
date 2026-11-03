@@ -3,7 +3,6 @@
 
 use effectcraft_keyframe::Value;
 use effectcraft_project::ParamUi;
-use effectcraft_raster::gaussian_blur;
 use rayon::prelude::*;
 
 use crate::util::{Plane, gauss_plane, guided_filter, morph_frac, morph_plane, premul, set_alpha, unpremul};
@@ -28,7 +27,7 @@ fn simple_choker(ctx: &EffectCtx, mut b: Buf) -> Buf {
         }
         let a = Plane::alpha(&b.img);
         let na = if c > 0.0 { morph_frac(&a, c, false) } else { morph_frac(&a, -c, true) };
-        set_alpha(&mut b.img, &na);
+        set_alpha(ctx, &mut b.img, &na);
     }
     if ctx.params.e("view") == 1 {
         matte_view(&mut b);
@@ -63,7 +62,7 @@ fn matte_choker(ctx: &EffectCtx, mut b: Buf) -> Buf {
         a = choke_stage(a, g1, c1, s1);
         a = choke_stage(a, g2, c2, s2);
     }
-    set_alpha(&mut b.img, &a);
+    set_alpha(ctx, &mut b.img, &a);
     b
 }
 
@@ -208,7 +207,7 @@ fn refine(ctx: &EffectCtx, mut b: Buf, hard: bool) -> Buf {
         return b;
     }
     if decon && decon_amt > 0.0 {
-        let est = gaussian_blur(&b.img, decon_r * 0.5, decon_r * 0.5, true);
+        let est = ctx.gaussian_blur(&b.img, decon_r * 0.5, decon_r * 0.5, true);
         b.img.data.par_iter_mut().enumerate().for_each(|(i, px)| {
             let (c, a0) = unpremul(*px);
             let t = strength(i, a0);
@@ -220,7 +219,7 @@ fn refine(ctx: &EffectCtx, mut b: Buf, hard: bool) -> Buf {
             }
         });
     }
-    set_alpha(&mut b.img, &na);
+    set_alpha(ctx, &mut b.img, &na);
     b
 }
 

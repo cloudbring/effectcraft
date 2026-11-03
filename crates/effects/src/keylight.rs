@@ -24,7 +24,7 @@
 use effectcraft_color::luminance;
 use effectcraft_keyframe::Value;
 use effectcraft_project::ParamUi;
-use effectcraft_raster::{Image, gaussian_blur};
+use effectcraft_raster::Image;
 use rayon::prelude::*;
 
 use crate::util::{Plane, gauss_plane, morph_frac, point_in_poly, premul, unpremul};
@@ -259,7 +259,7 @@ fn key_light(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let src = crop_source(ctx, &b);
     let blurred;
     let key_src: &Image = if preblur > 0.0 {
-        blurred = gaussian_blur(&src, preblur * 0.5, preblur * 0.5, true);
+        blurred = ctx.gaussian_blur(&src, preblur * 0.5, preblur * 0.5, true);
         &blurred
     } else {
         &src

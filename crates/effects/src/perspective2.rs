@@ -54,7 +54,7 @@ fn cc_environment(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let env = ctx.layer_param("environment", true).unwrap_or_else(|| LayerPixels { buf: b.clone(), size: ctx.layer_size });
     let env_img = if ctx.params.b("filterEnvironment") {
         let s = 2.0 * env.buf.scale;
-        effectcraft_raster::gaussian_blur(&env.buf.img, s, s, true)
+        ctx.gaussian_blur(&env.buf.img, s, s, true)
     } else {
         env.buf.img.clone()
     };

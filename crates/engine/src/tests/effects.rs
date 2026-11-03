@@ -625,7 +625,7 @@ fn opening_an_old_project_upgrades_effect_instances() {
 /// its origin. Opening converts them to effect space so points that were set keep their place
 /// in the comp; points at their default become the layer centre; layers with a source
 /// rectangle, adjustment layers (their effects see the comp below as it is) and expression
-/// controls keep their values. Saving writes schema 2, and opening that again changes nothing.
+/// controls keep their values. Saving writes the current schema, and opening that again changes nothing.
 #[test]
 fn opening_a_schema_1_project_moves_shape_layer_effect_points_into_effect_space() {
     let mut s = Session::default();
@@ -656,7 +656,7 @@ fn opening_a_schema_1_project_moves_shape_layer_effect_points_into_effect_space(
     set(&mut s, adjust, on_adjust, "center", [40.0, 30.0]);
     assert_eq!(point(&s, shape, bulge, "center"), KV::Vec2([100.0, 50.0]), "Bulge's default centre");
 
-    let old = s.project.to_file_json().unwrap().replacen("\"schema\": 2", "\"schema\": 1", 1);
+    let old = s.project.to_file_json().unwrap().replacen(&format!("\"schema\": {}", effectcraft_project::SCHEMA_VERSION), "\"schema\": 1", 1);
     assert!(old.contains("\"schema\": 1"));
     let dir = std::env::temp_dir().join(format!("ec-effect-space-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -679,6 +679,20 @@ fn opening_a_schema_1_project_moves_shape_layer_effect_points_into_effect_space(
     s3.execute("file.open", json!({"path": path})).unwrap();
     let _ = std::fs::remove_dir_all(dir);
     check(&s3);
+}
+
+#[test]
+fn gaussian_compatibility_setting_is_undoable_and_saved() {
+    let mut session = Session::default();
+    assert!(!session.project.settings.legacy_gaussian_blur);
+    session.execute("file.projectSettings", json!({"legacyGaussianBlur": true})).unwrap();
+    assert!(session.project.settings.legacy_gaussian_blur);
+    let saved = session.project.to_file_json().unwrap();
+    assert!(effectcraft_project::Project::from_json(&saved).unwrap().settings.legacy_gaussian_blur);
+    session.execute("edit.undo", json!({})).unwrap();
+    assert!(!session.project.settings.legacy_gaussian_blur);
+    assert!(session.execute("file.projectSettings", json!({"legacyGaussianBlur": "true"})).is_err());
+    assert!(!session.project.settings.legacy_gaussian_blur);
 }
 
 /// #410: `effect.warning` reports what an OCIO effect can't render as asked (Effect Controls

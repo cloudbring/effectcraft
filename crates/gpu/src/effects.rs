@@ -311,7 +311,7 @@ fn gaussian(e: &mut Enc, ctx: &EffectCtx, mut b: GBuf) -> Option<GBuf> {
     }
     let (kx, ky) = dims_xy(ctx.params.e("dimensions"));
     // Small sigmas use the CPU's sampled kernel (#1939).
-    if effectcraft_raster::gaussian_is_exact(s * kx, s * ky) {
+    if !ctx.env.legacy_gaussian_blur || effectcraft_raster::gaussian_is_exact(s * kx, s * ky) {
         return None;
     }
     let repeat = ctx.params.b("repeatEdge");

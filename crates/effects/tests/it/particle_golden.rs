@@ -297,6 +297,7 @@ fn hashes() -> Vec<(String, u64)> {
                 for t in TIMES {
                     let img = render(id, set, t, bpc8, half);
                     let name = format!("{id}/{si}/{}{}/t{t}", if bpc8 { "8bpc" } else { "32bpc" }, if half { "/half" } else { "" });
+                    super::snapshot(&name, &img);
                     if let Some(d) = &out_dir {
                         let bytes: Vec<u8> = img.data.iter().flat_map(|p| p.iter().flat_map(|c| c.to_le_bytes())).collect();
                         let file = format!("{}_{}x{}.f32", name.replace('/', "_"), img.width, img.height);

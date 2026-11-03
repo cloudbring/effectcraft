@@ -1,7 +1,7 @@
 use super::comp::Comp;
 use super::footage::{Footage, FootageKind, Proxy, Solid};
 use super::layer::LayerSource;
-use super::settings::{APP_VERSION, ProjectError, ProjectSettings, SCHEMA_VERSION, SavedView};
+use super::settings::{APP_VERSION, ProjectError, ProjectSettings, SCHEMA_VERSION, SavedView, check_schema};
 use super::{Arc, BTreeMap, Deserialize, FrameRate, Label, Project, Serialize, Tick, file_check, limits};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -272,7 +272,7 @@ impl Project {
     /// [`Project::to_file_json`] that also records the open compositions ([`SavedView`]), on one
     /// line when `compact` (Settings ▸ Project ▸ Save Compact Project Files).
     pub fn to_file_json_with_view(&self, view: &SavedView, compact: bool) -> Result<String, ProjectError> {
-        craft_ecproj_format::check_schema(self.schema)
+        check_schema(self.schema)
             .map_err(|e| ProjectError::Invalid(format!("the project can't be saved: it holds a value a project file can't store ({e})")))?;
         let file = craft_ecproj_format::File::new(APP_VERSION, view, self);
         file_check::check(&file)
@@ -299,7 +299,7 @@ impl Project {
     /// hostile file still opens, within bounds, and the user can be told what changed.
     pub fn from_json_repaired(s: &str) -> Result<(Project, Vec<String>), ProjectError> {
         let mut p: Project = serde_json::from_str(s).map_err(|e| ProjectError::Invalid(e.to_string()))?;
-        craft_ecproj_format::check_schema(p.schema).map_err(|e| ProjectError::Invalid(e.to_string()))?;
+        check_schema(p.schema).map_err(ProjectError::Invalid)?;
         p.fix_next_id();
         let mut notes = vec![];
         for item in p.items.values_mut() {

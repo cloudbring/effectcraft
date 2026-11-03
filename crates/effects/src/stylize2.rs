@@ -68,7 +68,7 @@ fn cartoon(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let smoothed = if enh < 0.0 {
         // Softening: blend towards a blur of the picture.
         let s = 1.5 * b.scale;
-        let blur = effectcraft_raster::gaussian_blur(&smoothed, s, s, true);
+        let blur = ctx.gaussian_blur(&smoothed, s, s, true);
         let k = (-enh) as f32;
         let mut out = smoothed;
         out.data.par_iter_mut().zip(blur.data.par_iter()).for_each(|(p, q)| (0..4).for_each(|c| p[c] += (q[c] - p[c]) * k));

@@ -135,7 +135,7 @@ pub(super) fn caustics(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let st = caustics_setup(ctx, &b);
     let mut bottom = st.bottom.clone().unwrap_or_else(|| b.img.clone());
     if st.bottom_sigma > 0.0 {
-        bottom = effectcraft_raster::gaussian_blur(&bottom, st.bottom_sigma, st.bottom_sigma, false);
+        bottom = ctx.gaussian_blur(&bottom, st.bottom_sigma, st.bottom_sigma, false);
     }
     let CausticsSetup {
         scaling,

@@ -1,10 +1,6 @@
-//! Blurs: separable box passes (exact running sums) approximating Gaussians, a sampled Gaussian
-//! kernel for small sigmas, plus directional and radial (spin/zoom) blurs.
-//!
-//! Box passes run straight on row-major pixels: horizontal passes per row, vertical passes over
-//! blocks of rows with a per-column running sum (no transposes), ping-ponging between two
-//! buffers so a Gaussian allocates two images regardless of the number of passes.
+//! Shared variance-exact Gaussian filtering, explicit box blurs, and directional/radial blurs.
 
+use craft_blur::{Cancel, Edge, Error, Gaussian, LINE_BATCH, Quality, Scratch, Shape};
 use rayon::prelude::*;
 
 use crate::{Image, Px};
@@ -128,77 +124,81 @@ fn box_passes(img: &Image, rx: &[usize], ry: &[usize], repeat: bool) -> Image {
     a
 }
 
-/// Box radii for `n` passes approximating a Gaussian of `sigma` (Kovesi / "boxes for Gauss").
-fn box_radii(sigma: f64, n: usize) -> Vec<usize> {
-    if sigma <= 0.0 {
-        return vec![0; n];
-    }
-    let w_ideal = (12.0 * sigma * sigma / n as f64 + 1.0).sqrt();
-    let mut wl = w_ideal.floor() as i64;
-    if wl % 2 == 0 {
-        wl -= 1;
-    }
-    let wu = wl + 2;
-    let m_ideal = (12.0 * sigma * sigma - (n as i64 * wl * wl) as f64 - 4.0 * n as f64 * wl as f64 - 3.0 * n as f64) / (-4.0 * wl as f64 - 4.0);
-    let m = m_ideal.round() as i64;
-    (0..n as i64).map(|i| (((if i < m { wl } else { wu }) - 1) / 2).max(0) as usize).collect()
-}
-
 /// Separable box blur with given radii, `iterations` passes.
 pub fn box_blur(img: &Image, rx: usize, ry: usize, iterations: usize, repeat: bool) -> Image {
     let n = iterations.max(1);
     box_passes(img, &vec![rx; n], &vec![ry; n], repeat)
 }
 
-/// Gaussian blur with standard deviations in pixels (3 box passes per axis).
+/// Variance-exact Gaussian with standard deviations in pixels, on premultiplied RGBA.
 pub fn gaussian_blur(img: &Image, sigma_x: f64, sigma_y: f64, repeat: bool) -> Image {
-    let rx = if sigma_x > 0.05 { box_radii(sigma_x, 3) } else { vec![] };
-    let ry = if sigma_y > 0.05 { box_radii(sigma_y, 3) } else { vec![] };
-    box_passes(img, &rx, &ry, repeat)
+    gaussian_blur_with_quality(img, sigma_x, sigma_y, repeat, Quality::Recursive)
 }
 
-/// Below this sigma (pixels) three integer-radius box passes are too coarse (sigma under ~0.6 is
-/// a no-op and the result steps between a few shapes), so [`gaussian_blur_exact`] is used instead.
+/// The old Gaussian effect's sampled/box crossover, retained for project compatibility and GPU
+/// dispatch. The default CPU filter owns its own sampled/recursive crossover in craft-blur.
 const EXACT_SIGMA_BELOW: f64 = 3.0;
 
-/// True when a Gaussian of these per-axis sigmas should use [`gaussian_blur_exact`].
+/// Whether a legacy Gaussian uses a sampled kernel rather than quantized boxes.
 pub fn gaussian_is_exact(sigma_x: f64, sigma_y: f64) -> bool {
     sigma_x.max(sigma_y) < EXACT_SIGMA_BELOW
 }
 
-/// One separable pass of a sampled Gaussian (radius 3 sigma) along x or y.
-fn gauss_pass(img: &Image, sigma: f64, vertical: bool, repeat: bool) -> Image {
-    // Below 1e-3 the kernel is the identity in f64; tiny sigmas would also make 2σ² underflow to 0 (NaN taps).
-    if sigma.is_nan() || sigma <= 1e-3 || img.is_empty() {
-        return img.clone();
-    }
-    let r = (sigma * 3.0).ceil() as i64;
-    let mut k: Vec<f64> = (-r..=r).map(|i| (-((i * i) as f64) / (2.0 * sigma * sigma)).exp()).collect();
-    let total: f64 = k.iter().sum();
-    k.iter_mut().for_each(|v| *v /= total);
-    let w = img.width as usize;
-    let mut out = Image::new(img.width, img.height);
-    out.rows_mut().for_each(|(y, row)| {
-        for x in 0..w {
-            let mut acc = [0.0f64; 4];
-            for (i, wt) in k.iter().enumerate() {
-                let d = i as i64 - r;
-                let (sx, sy) = if vertical { (x as i64, y as i64 + d) } else { (x as i64 + d, y as i64) };
-                let p = if repeat { img.get_clamped(sx, sy) } else { img.get(sx, sy) };
-                for c in 0..4 {
-                    acc[c] += p[c] as f64 * wt;
-                }
-            }
-            row[x] = acc.map(|v| v as f32);
+/// Explicit quality selection, including the legacy three-box approximation. Render functions
+/// cannot return errors; failures are logged and preserve the unmodified input. Hosts that can
+/// report a failed/cancelled render should call [`try_gaussian_blur`] instead.
+pub fn gaussian_blur_with_quality(img: &Image, sigma_x: f64, sigma_y: f64, repeat: bool, quality: Quality) -> Image {
+    match try_gaussian_blur(img, sigma_x, sigma_y, repeat, quality, Cancel::Never) {
+        Ok(image) => image,
+        Err(error) => {
+            log::error!("Gaussian render failed: {error}");
+            img.clone()
         }
-    });
-    out
+    }
 }
 
-/// Gaussian blur as a true sampled kernel, continuous in sigma (for small sigmas, see
-/// [`gaussian_is_exact`]).
+/// The shared calibrated sampled kernel, with no box approximation or recursive tail.
 pub fn gaussian_blur_exact(img: &Image, sigma_x: f64, sigma_y: f64, repeat: bool) -> Image {
-    gauss_pass(&gauss_pass(img, sigma_x, false, repeat), sigma_y, true, repeat)
+    gaussian_blur_with_quality(img, sigma_x, sigma_y, repeat, Quality::Exact)
+}
+
+/// Fallible, cancellable Gaussian. Every recursive worker owns complete lines, not independently
+/// initialized tiles. Scratch is reused across row batches/column stripes within each worker.
+/// A cancellation discards the partially filtered copy and never changes `img`.
+pub fn try_gaussian_blur(img: &Image, sigma_x: f64, sigma_y: f64, repeat: bool, quality: Quality, cancel: Cancel<'_>) -> Result<Image, Error> {
+    let shape = Shape::new(img.width as usize, img.height as usize, 4)?;
+    if img.data.as_flattened().len() != shape.samples() {
+        return Err(Error::InvalidDimensions);
+    }
+    if cancel.cancelled() {
+        return Err(Error::Cancelled);
+    }
+    let sigma = |value: f64| if value.is_nan() || value <= 1e-3 { 0.0 } else { value as f32 };
+    let horizontal = Gaussian::new(sigma(sigma_x), quality)?;
+    let vertical = Gaussian::new(sigma(sigma_y), quality)?;
+    let mut output = img.clone();
+    if img.is_empty() {
+        return Ok(output);
+    }
+    let edge = if repeat { Edge::Clamp } else { Edge::Transparent };
+    let width = shape.width();
+    if horizontal.sigma() > 0.0 {
+        let batch = width.checked_mul(LINE_BATCH * 8).ok_or(Error::SizeOverflow)?;
+        output.data.par_chunks_mut(batch).try_for_each_init(Scratch::default, |scratch, rows| {
+            let rows_shape = Shape::new(width, rows.len() / width, 4)?;
+            horizontal.filter_rows(rows.as_flattened_mut(), rows_shape, edge, scratch, cancel)
+        })?;
+    }
+    if vertical.sigma() > 0.0 {
+        let mut stripes: Vec<Vec<&mut [f32]>> = (0..width.div_ceil(64)).map(|_| Vec::with_capacity(shape.height())).collect();
+        for row in output.data.chunks_mut(width) {
+            for (stripe, pixels) in stripes.iter_mut().zip(row.chunks_mut(64)) {
+                stripe.push(pixels.as_flattened_mut());
+            }
+        }
+        stripes.par_iter_mut().try_for_each_init(Scratch::default, |scratch, rows| vertical.filter_columns(rows, 4, edge, scratch, cancel))?;
+    }
+    Ok(output)
 }
 
 /// Motion blur along `angle_deg` (0 = vertical in AE's Directional Blur, measured clockwise from
@@ -263,6 +263,73 @@ pub fn radial_blur(img: &Image, center: (f64, f64), amount: f64, zoom: bool) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn impulse_variance(sigma: f64, vertical: bool, quality: Quality) -> f64 {
+        let extent = (sigma * 32.0).max(64.0) as u32;
+        let length = extent * 2 + 1;
+        let mut image = if vertical { Image::new(1, length) } else { Image::new(length, 1) };
+        image.data[extent as usize] = [0.25, 0.5, 1.0, 1.0];
+        let (sigma_x, sigma_y) = if vertical { (0.0, sigma) } else { (sigma, 0.0) };
+        let output = try_gaussian_blur(&image, sigma_x, sigma_y, false, quality, Cancel::Never).unwrap();
+        let mass: f64 = output.data.iter().map(|pixel| f64::from(pixel[3])).sum();
+        assert!((mass - 1.0).abs() < 1e-4, "sigma {sigma}: mass {mass}");
+        output.data.iter().enumerate().map(|(index, pixel)| (index as f64 - f64::from(extent)).powi(2) * f64::from(pixel[3])).sum::<f64>() / mass
+    }
+
+    #[test]
+    fn gaussian_variance_is_exact_on_both_axes() {
+        for sigma in [1.0, 4.0, 16.0, 64.0] {
+            for vertical in [false, true] {
+                let variance = impulse_variance(sigma, vertical, Quality::Recursive);
+                let error = (variance / sigma.powi(2) - 1.0).abs();
+                println!("sigma={sigma}, vertical={vertical}, variance={variance:.9}, relative_error={error:.9}");
+                assert!(error < 0.005, "sigma {sigma}, vertical {vertical}: {variance}");
+            }
+        }
+    }
+
+    #[test]
+    fn box_compatibility_retains_the_documented_variance_deficit() {
+        for sigma in [1.0, 4.0, 16.0, 64.0] {
+            let variance = impulse_variance(sigma, false, Quality::BoxApprox { passes: 3 });
+            assert!((variance / sigma.powi(2) - (1.0 - 1.0 / (3.0 * sigma))).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn parallel_gaussian_matches_shared_serial_kernel() {
+        let mut image = Image::new(67, 23);
+        for (index, pixel) in image.data.iter_mut().enumerate() {
+            *pixel = [(index % 17) as f32 - 4.0, 0.25, 2.0, 0.5];
+        }
+        for sigma in [1.0, 4.0, 16.0, 64.0] {
+            for repeat in [false, true] {
+                let mut serial = image.clone();
+                let shape = Shape::new(67, 23, 4).unwrap();
+                let edge = if repeat { Edge::Clamp } else { Edge::Transparent };
+                Gaussian::new(sigma as f32, Quality::Recursive)
+                    .unwrap()
+                    .apply(serial.data.as_flattened_mut(), shape, edge, &mut Scratch::default(), Cancel::Never)
+                    .unwrap();
+                assert_eq!(gaussian_blur(&image, sigma, sigma, repeat), serial, "sigma {sigma}, repeat {repeat}");
+            }
+        }
+    }
+
+    #[test]
+    fn gaussian_errors_and_cancellation_never_modify_the_input() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let image = Image::filled(33, 31, [0.25, 0.5, 2.0, 0.5]);
+        let original = image.clone();
+        let calls = AtomicUsize::new(0);
+        let cancelled = || calls.fetch_add(1, Ordering::Relaxed) >= 2;
+        assert_eq!(try_gaussian_blur(&image, 4.0, 4.0, true, Quality::Recursive, Cancel::Hook(&cancelled)), Err(Error::Cancelled));
+        assert_eq!(image, original);
+        assert_eq!(try_gaussian_blur(&image, f64::INFINITY, 0.0, true, Quality::Recursive, Cancel::Never), Err(Error::InvalidSigma));
+        let malformed = Image { width: 100, height: 100, data: vec![[0.0; 4]] };
+        assert_eq!(try_gaussian_blur(&malformed, 4.0, 4.0, true, Quality::Recursive, Cancel::Never), Err(Error::InvalidDimensions));
+        assert_eq!(gaussian_blur(&Image::new(0, 4), 4.0, 4.0, false), Image::new(0, 4));
+    }
 
     #[test]
     fn gaussian_preserves_mass() {
@@ -342,7 +409,7 @@ mod tests {
 
     #[test]
     fn radii_sane() {
-        let r = box_radii(10.0, 3);
+        let r = craft_blur::box_widths(10.0).unwrap().map(|width| width / 2);
         assert_eq!(r.len(), 3);
         assert!(r.iter().all(|&v| (7..=10).contains(&v)), "{r:?}");
     }

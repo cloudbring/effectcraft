@@ -651,6 +651,7 @@ fn key_any(ctx: &EvalCtx, layer: &Layer, scale: f64, draft: bool, blur: bool, fo
     }
     // Bit depth and colour management change the pixels.
     crate::color::Pipe::of(&ctx.project.settings).key().hash(&mut h);
+    ctx.project.settings.legacy_gaussian_blur.hash(&mut h);
     ctx.comp_id.hash(&mut h);
     ctx.comp.width.hash(&mut h);
     ctx.comp.height.hash(&mut h);

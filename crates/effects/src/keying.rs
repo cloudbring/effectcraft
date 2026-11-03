@@ -5,7 +5,7 @@
 use effectcraft_color::{rgb_to_hsl, srgb_to_linear};
 use effectcraft_keyframe::Value;
 use effectcraft_project::ParamUi;
-use effectcraft_raster::{Image, gaussian_blur};
+use effectcraft_raster::Image;
 use rayon::prelude::*;
 
 use crate::color_fx::luma_601;
@@ -356,7 +356,7 @@ fn screen_key(ctx: &EffectCtx, mut b: Buf) -> Buf {
 
     let blurred;
     let key_src = if preblur > 0.0 {
-        blurred = gaussian_blur(&b.img, preblur * 0.5, preblur * 0.5, true);
+        blurred = ctx.gaussian_blur(&b.img, preblur * 0.5, preblur * 0.5, true);
         &blurred
     } else {
         &b.img
@@ -518,7 +518,7 @@ fn key_cleaner(ctx: &EffectCtx, mut b: Buf) -> Buf {
     if ctx.params.b("reduceChatter") {
         a = gauss_plane(&a, 1.0, 1.0).map(|v| ((v - 0.5) * 1.5 + 0.5).clamp(0.0, 1.0));
     }
-    let est = if r > 0.0 && strength > 0.0 { Some(gaussian_blur(&b.img, r * 0.5, r * 0.5, true)) } else { None };
+    let est = if r > 0.0 && strength > 0.0 { Some(ctx.gaussian_blur(&b.img, r * 0.5, r * 0.5, true)) } else { None };
     b.img.data.par_iter_mut().zip(a.data.par_iter()).enumerate().for_each(|(i, (px, &na))| {
         let (mut c, a0) = unpremul(*px);
         if let Some(e) = &est

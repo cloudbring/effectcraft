@@ -316,6 +316,7 @@ fn hashes() -> Vec<(String, u64)> {
                 for t in TIMES {
                     let img = render(id, set, t, bpc8, half);
                     let name = format!("{id}/{si}/{}{}/t{t}", if bpc8 { "8bpc" } else { "32bpc" }, if half { "/half" } else { "" });
+                    super::snapshot(&name, &img);
                     v.push((name, fnv(&img)));
                 }
             }

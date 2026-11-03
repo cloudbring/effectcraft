@@ -540,6 +540,8 @@ pub struct EffectEnv<'a> {
     pub working_linear: bool,
     /// The project works in 32 bpc float (Levels' "Off for 32 bpc Color" clips only below it).
     pub float_depth: bool,
+    /// Project compatibility switch for RGBA Gaussian filters, including auxiliary effects.
+    pub legacy_gaussian_blur: bool,
     /// The composition's shutter (angle and phase in degrees, samples per frame) when both the
     /// comp's and the layer's motion blur switches are on (Transform's Use Composition's
     /// Shutter Angle).
@@ -562,6 +564,24 @@ pub struct EffectCtx<'a> {
 }
 
 impl EffectCtx<'_> {
+    /// Shared RGBA Gaussian quality, including auxiliary effects' legacy three-box shape.
+    pub fn gaussian_blur(&self, image: &Image, sigma_x: f64, sigma_y: f64, repeat: bool) -> Image {
+        use effectcraft_raster::{BlurQuality, gaussian_blur_with_quality};
+        let quality = if self.env.legacy_gaussian_blur { BlurQuality::BoxApprox { passes: 3 } } else { BlurQuality::Recursive };
+        gaussian_blur_with_quality(image, sigma_x, sigma_y, repeat, quality)
+    }
+
+    /// Gaussian Blur and its obsolete variant historically sampled small sigmas directly.
+    pub fn gaussian_effect(&self, image: &Image, sigma_x: f64, sigma_y: f64, repeat: bool) -> Image {
+        use effectcraft_raster::{BlurQuality, gaussian_blur_with_quality, gaussian_is_exact};
+        let quality = if self.env.legacy_gaussian_blur {
+            if gaussian_is_exact(sigma_x, sigma_y) { BlurQuality::Exact } else { BlurQuality::BoxApprox { passes: 3 } }
+        } else {
+            BlurQuality::Recursive
+        };
+        gaussian_blur_with_quality(image, sigma_x, sigma_y, repeat, quality)
+    }
+
     /// The layer chosen in layer parameter `id`, via the host.
     /// `masks_and_effects` is the effect's built-in choice, used when the instance has no
     /// source companion parameter (see [`layer_source_id`]).

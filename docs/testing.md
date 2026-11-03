@@ -34,6 +34,12 @@ or `cargo nextest run -p <crate> -E 'binary(it) and test(/^<module>::/)'`.
   Wipe) at several settings, times, bit depths and resolutions, so any change to their CPU output
   fails (re-pin with `SIM_GOLDEN_PRINT=1` after an intended change; pinned for aarch64 macOS,
   with the hashes another macOS release's libm gives for unchanged code in `LIBM_VARIANTS`).
+  For a render-affecting migration, capture all four integration golden suites with
+  `BLUR_GOLDEN_OUT=/absolute/path/before cargo test -p effectcraft-effects --test it`, then repeat
+  into an `after` directory. Files are little-endian RGBA f32 with dimensions in the filename.
+  Compare every frame and record the maximum absolute channel difference before re-pinning only
+  intended changes. `SIM_GOLDEN_PRINT=1 GEN_GOLDEN_PRINT=1 cargo test -p effectcraft-effects --test it -- --nocapture`
+  prints the current tables. Do not re-pin an already accepted `LIBM_VARIANTS` hash.
 - **Export** (`crates/export/tests`): every format is encoded and decoded back, checking frame
   count, size and pixels. When `ffmpeg`/`ffprobe` are installed they are used as an outside
   check; they are never linked or shipped.

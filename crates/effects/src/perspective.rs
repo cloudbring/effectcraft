@@ -7,7 +7,7 @@
 
 use effectcraft_keyframe::Value;
 use effectcraft_project::ParamUi;
-use effectcraft_raster::{Image, Px, gaussian_blur};
+use effectcraft_raster::{Image, Px};
 use rayon::prelude::*;
 
 use crate::util::{Plane, gauss_plane, layer_rect, premul, smoothstep, unpremul};
@@ -144,7 +144,7 @@ fn radial_shadow(ctx: &EffectCtx, mut b: Buf) -> Buf {
         }
     });
     if soft > 0.0 {
-        sh = gaussian_blur(&sh, soft * 0.5, soft * 0.5, false);
+        sh = ctx.gaussian_blur(&sh, soft * 0.5, soft * 0.5, false);
     }
     if !only {
         sh.data.par_iter_mut().zip(src.data.par_iter()).for_each(|(s, o)| {

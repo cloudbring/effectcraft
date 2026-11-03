@@ -853,7 +853,7 @@ fn upscale(ctx: &EffectCtx, mut b: Buf) -> Buf {
     }
     let detail = (ctx.params.f("detail") / 100.0) as f32;
     let noise = ctx.params.f("reduceNoise") / 100.0;
-    let src = if noise > 0.0 { effectcraft_raster::gaussian_blur(&b.img, noise * 1.5, noise * 1.5, true) } else { b.img.clone() };
+    let src = if noise > 0.0 { ctx.gaussian_blur(&b.img, noise * 1.5, noise * 1.5, true) } else { b.img.clone() };
     let lc = [ctx.layer_size[0] * 0.5, ctx.layer_size[1] * 0.5];
     // Alpha: Bilinear (index 0) resamples the alpha channel bilinearly, Bicubic like the colour.
     let bilinear_alpha = ctx.params.e("alpha") == 0;
@@ -894,7 +894,7 @@ fn upscale(ctx: &EffectCtx, mut b: Buf) -> Buf {
     };
     if detail > 0.0 {
         let sigma = 0.6 * k;
-        let blur = effectcraft_raster::gaussian_blur(&out, sigma, sigma, true);
+        let blur = ctx.gaussian_blur(&out, sigma, sigma, true);
         out.data.par_iter_mut().zip(blur.data.par_iter()).for_each(|(p, q)| {
             let a = p[3];
             for c in 0..3 {

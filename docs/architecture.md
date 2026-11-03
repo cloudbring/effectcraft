@@ -1,6 +1,6 @@
 # Architecture
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-29 · **Change:** minor (SAM 2 crate added to the layer table) · **Target:** Adobe After Effects 2026
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-11-03 · **Change:** schema 3 Gaussian compatibility flag · **Target:** Adobe After Effects 2026
 
 EffectCraft is a stack of small Rust crates. The engine knows nothing about the user interface;
 the egui frontend, the command-line tool and the MCP server all sit on top of the same `Session`
@@ -102,6 +102,14 @@ file's format (`.ecprojx` stays XML). Next to `savedBy` the file records the act
 open comp tabs (`activeComp`, `openComps`), which opening restores; they are editor state, not
 part of `Project`, so older files (and ids that no longer name a comp) open on the first comp and
 older versions ignore them.
+
+Schema 3 records `settings.legacy_gaussian_blur`: new projects use the shared variance-exact
+Gaussian; files without the flag retain the Gaussian effects' and auxiliary filters' legacy three-box shape. The flag
+can be changed through `file.projectSettings {"legacyGaussianBlur": true}` with undo support. It does not promise
+bit-identical old f32 summation. See
+[`gaussian-blur-migration.md`](gaussian-blur-migration.md) for the kernel contract and measurements.
+EffectCraft owns this schema gate; `craft-ecproj-format` still supplies the file envelope and
+saved-view/version metadata, but its schema-2 gate is not used to validate schema-3 projects.
 
 `schema` changes when a saved value changes meaning; a project from an older schema is converted
 when it is opened (`effectcraft_engine::upgrade_effects`, which also refreshes effect instances

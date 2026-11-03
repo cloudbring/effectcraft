@@ -5,7 +5,7 @@
 use effectcraft_color::luminance;
 use effectcraft_keyframe::Value;
 use effectcraft_project::ParamUi;
-use effectcraft_raster::{Image, Px, gaussian_blur};
+use effectcraft_raster::{Image, Px};
 use rayon::prelude::*;
 
 use crate::util::{Plane, gauss_plane, premul, unpremul};
@@ -210,7 +210,7 @@ fn compound_blur(ctx: &EffectCtx, mut b: Buf) -> Buf {
             if k == 0 {
                 b.img.clone()
             } else {
-                gaussian_blur(&b.img, max_sigma * k as f64 / (N - 1) as f64, max_sigma * k as f64 / (N - 1) as f64, ctx.adjustment)
+                ctx.gaussian_blur(&b.img, max_sigma * k as f64 / (N - 1) as f64, max_sigma * k as f64 / (N - 1) as f64, ctx.adjustment)
             }
         })
         .collect();
@@ -623,7 +623,7 @@ fn reduce_flicker(ctx: &EffectCtx, mut b: Buf) -> Buf {
     if s < 0.05 {
         return b;
     }
-    b.img = gaussian_blur(&b.img, 0.0, s, true);
+    b.img = ctx.gaussian_blur(&b.img, 0.0, s, true);
     b
 }
 
@@ -807,7 +807,7 @@ mod tests {
     fn bilateral_keeps_edge_sharper_than_gaussian() {
         let img = edge_img();
         let bl = run("ec.blur.bilateral", &img, &[("radius", num(4.0))]).img;
-        let g = gaussian_blur(&img, 2.0, 2.0, true);
+        let g = effectcraft_raster::gaussian_blur(&img, 2.0, 2.0, true);
         let jump_b = bl.get(16, 8)[0] - bl.get(15, 8)[0];
         let jump_g = g.get(16, 8)[0] - g.get(15, 8)[0];
         assert!(jump_b > 0.7, "{jump_b}");

@@ -189,6 +189,22 @@ fn project_files_refuse_newer_schemas() {
 }
 
 #[test]
+fn gaussian_compatibility_is_versioned_and_round_trips() {
+    let project = Project::default();
+    assert_eq!(project.schema, 3);
+    assert!(!project.settings.legacy_gaussian_blur);
+    let text = project.to_file_json().unwrap();
+    assert_eq!(Project::from_json(&text).unwrap(), project);
+    let mut old: serde_json::Value = serde_json::from_str(&text).unwrap();
+    old["schema"] = 2.into();
+    old["settings"].as_object_mut().unwrap().remove("legacy_gaussian_blur");
+    let mut reopened = Project::from_json(&old.to_string()).unwrap();
+    assert!(reopened.settings.legacy_gaussian_blur);
+    reopened.schema = crate::SCHEMA_VERSION;
+    assert_eq!(Project::from_json(&reopened.to_file_json().unwrap()).unwrap(), reopened);
+}
+
+#[test]
 fn saved_files_reopen_in_pretty_and_compact_form() {
     let (p, _cid) = project_with_layer();
     assert_eq!(Project::from_json(&p.to_file_json().unwrap()).unwrap(), p, "the pretty project file");

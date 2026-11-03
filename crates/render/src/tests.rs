@@ -605,6 +605,26 @@ fn add_effect_200(p: &mut Project, l: &mut effectcraft_project::Layer, id: &str,
     add_effect(p, l, id, [200.0, 100.0], vals);
 }
 
+#[test]
+fn gaussian_compatibility_invalidates_cached_layers() {
+    let (mut project, comp_id, comp) = setup();
+    let mut layer = solid(&mut project, &comp, [1.0; 3], 30, 30);
+    add_effect(&mut project, &mut layer, "ec.blur.gaussian", [30.0; 2], &[("blurriness", Value::Scalar(32.0))]);
+    project.comp_mut(comp_id).unwrap().layers.push(layer);
+    let key = |project: &Project| {
+        let comp = project.comp(comp_id).unwrap();
+        crate::cache::layer_key(&crate::EvalCtx::new(project, comp_id, comp, Tick::ZERO), &comp.layers[0], 1.0, false, false).unwrap()
+    };
+    let cache = crate::LayerCache::default();
+    let modern_key = key(&project);
+    let modern = render_cached(&project, comp_id, Tick::ZERO, Some(&cache));
+    project.settings.legacy_gaussian_blur = true;
+    assert_ne!(modern_key, key(&project));
+    let legacy = render_cached(&project, comp_id, Tick::ZERO, Some(&cache));
+    assert_same(&legacy, &render_cached(&project, comp_id, Tick::ZERO, None), "Gaussian compatibility cache invalidation");
+    assert_ne!(modern.data, legacy.data);
+}
+
 fn add_effect(p: &mut Project, l: &mut effectcraft_project::Layer, id: &str, size: [f64; 2], vals: &[(&str, Value)]) {
     let spec = effectcraft_effects::find(id).unwrap();
     let mut next = p.next_id;

@@ -138,7 +138,10 @@ fn hashes() -> Vec<(String, u64)> {
     let mut v = Vec::new();
     for (si, set) in cases().iter().enumerate() {
         for t in TIMES {
-            v.push((format!("timewarp/{si}/t{t}"), fnv(&render(set, t))));
+            let name = format!("timewarp/{si}/t{t}");
+            let image = render(set, t);
+            super::snapshot(&name, &image);
+            v.push((name, fnv(&image)));
         }
     }
     v

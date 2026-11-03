@@ -397,10 +397,10 @@ pub fn gen_image(w: u32, h: u32, f: impl Fn(usize, usize) -> Px + Sync) -> Image
 
 /// Replace the alpha of `img` with `new_a`, keeping straight colour. Pixels that were (nearly)
 /// transparent take their colour from a small blur of the surroundings.
-pub fn set_alpha(img: &mut Image, new_a: &Plane) {
+pub fn set_alpha(ctx: &crate::EffectCtx, img: &mut Image, new_a: &Plane) {
     let needs_fill = img.data.par_iter().zip(new_a.data.par_iter()).any(|(p, &a)| p[3] <= 1e-4 && a > 1e-4);
     let fill = if needs_fill {
-        let blurred = effectcraft_raster::gaussian_blur(img, 3.0, 3.0, true);
+        let blurred = ctx.gaussian_blur(img, 3.0, 3.0, true);
         Some(blurred)
     } else {
         None

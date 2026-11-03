@@ -1090,6 +1090,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-blur"
+version = "0.1.0"
+source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2F2-craft-blur#75bb40cf0c06b7e046874f389376acbfd86915ab"
+
+[[package]]
 name = "craft-docpath"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13afff77f38b5c11b73aa0#92d392cff132eaf53e13afff77f38b5c11b73aa0"
@@ -1814,8 +1819,10 @@ dependencies = [
 name = "effectcraft-raster"
 version = "0.21.0"
 dependencies = [
+ "craft-blur",
  "effectcraft-color",
  "effectcraft-geom",
+ "log",
  "rayon",
 ]
 

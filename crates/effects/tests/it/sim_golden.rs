@@ -296,6 +296,7 @@ fn hashes() -> Vec<(String, u64)> {
                 for t in TIMES {
                     let img = render(id, set, t, bpc8, half);
                     let name = format!("{id}/{si}/{}{}/t{t}", if bpc8 { "8bpc" } else { "32bpc" }, if half { "/half" } else { "" });
+                    super::snapshot(&name, &img);
                     if let Some(d) = &out_dir {
                         let bytes: Vec<u8> = img.data.iter().flat_map(|p| p.iter().flat_map(|c| c.to_le_bytes())).collect();
                         let file = format!("{}_{}x{}.f32", name.replace('/', "_"), img.width, img.height);
@@ -533,14 +534,14 @@ const GOLDEN: &[(&str, u64)] = &[
     ("ec.sim.caustics/0/8bpc/half/t1.5", 0x9a602ac746c9e93a),
     ("ec.sim.caustics/0/8bpc/half/t0.8", 0x9a602ac746c9e93a),
     ("ec.sim.caustics/0/8bpc/half/t2.2", 0x9a602ac746c9e93a),
-    ("ec.sim.caustics/1/8bpc/t0.5", 0x282968317c36ccdf),
-    ("ec.sim.caustics/1/8bpc/t1.5", 0x282968317c36ccdf),
-    ("ec.sim.caustics/1/8bpc/t0.8", 0x282968317c36ccdf),
-    ("ec.sim.caustics/1/8bpc/t2.2", 0x282968317c36ccdf),
-    ("ec.sim.caustics/1/32bpc/t0.5", 0xc12df8561f396d45),
-    ("ec.sim.caustics/1/32bpc/t1.5", 0xc12df8561f396d45),
-    ("ec.sim.caustics/1/32bpc/t0.8", 0xc12df8561f396d45),
-    ("ec.sim.caustics/1/32bpc/t2.2", 0xc12df8561f396d45),
+    ("ec.sim.caustics/1/8bpc/t0.5", 0x0a36850e41845df6),
+    ("ec.sim.caustics/1/8bpc/t1.5", 0x0a36850e41845df6),
+    ("ec.sim.caustics/1/8bpc/t0.8", 0x0a36850e41845df6),
+    ("ec.sim.caustics/1/8bpc/t2.2", 0x0a36850e41845df6),
+    ("ec.sim.caustics/1/32bpc/t0.5", 0x031f28dafe1c3533),
+    ("ec.sim.caustics/1/32bpc/t1.5", 0x031f28dafe1c3533),
+    ("ec.sim.caustics/1/32bpc/t0.8", 0x031f28dafe1c3533),
+    ("ec.sim.caustics/1/32bpc/t2.2", 0x031f28dafe1c3533),
     ("ec.sim.caustics/2/8bpc/t0.5", 0x52ab258ae56e9b15),
     ("ec.sim.caustics/2/8bpc/t1.5", 0x52ab258ae56e9b15),
     ("ec.sim.caustics/2/8bpc/t0.8", 0x52ab258ae56e9b15),

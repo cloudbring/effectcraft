@@ -3,7 +3,6 @@
 
 use effectcraft_keyframe::Value;
 use effectcraft_project::ParamUi;
-use effectcraft_raster::gaussian_blur;
 use rayon::prelude::*;
 
 use crate::util::layer_rect;
@@ -100,12 +99,7 @@ fn gaussian_legacy(ctx: &EffectCtx, mut b: Buf) -> Buf {
         b.pad((s * 3.0).ceil() as u32);
     }
     let (sx, sy) = (s * kx, s * ky);
-    // Small sigmas use the sampled kernel, like Gaussian Blur (#1939).
-    b.img = if effectcraft_raster::gaussian_is_exact(sx, sy) {
-        effectcraft_raster::gaussian_blur_exact(&b.img, sx, sy, ctx.adjustment)
-    } else {
-        gaussian_blur(&b.img, sx, sy, ctx.adjustment)
-    };
+    b.img = ctx.gaussian_effect(&b.img, sx, sy, ctx.adjustment);
     b
 }
 

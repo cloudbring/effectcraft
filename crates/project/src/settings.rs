@@ -3,8 +3,13 @@ use super::{BTreeMap, ColorSpace, Deserialize, Label, Serialize, Tick};
 
 /// The project file schema. 2: effects on layers without a source rectangle (shape, text)
 /// measure positions from the top-left of their comp-sized bounds (effect space), not from
-/// the layer's origin; projects from schema 1 are converted when opened (#227).
-pub use craft_ecproj_format::SCHEMA_VERSION;
+/// the layer's origin; projects from schema 1 are converted when opened (#227). 3: Gaussian
+/// rendering records whether the project requests the legacy three-box approximation (#2).
+pub const SCHEMA_VERSION: u32 = 3;
+
+pub(crate) fn check_schema(schema: u32) -> Result<(), String> {
+    if schema > SCHEMA_VERSION { Err(format!("project schema {schema} is newer than this version supports ({SCHEMA_VERSION})")) } else { Ok(()) }
+}
 
 /// The first schema in which effect positions are in effect space (see [`SCHEMA_VERSION`]).
 pub const SCHEMA_EFFECT_SPACE: u32 = 2;
@@ -222,6 +227,10 @@ pub struct ProjectSettings {
     /// when a GPU adapter exists) or Mercury Software Only (`false`, the CPU compositor).
     #[serde(default = "yes")]
     pub gpu_acceleration: bool,
+    /// Retain Gaussian effects' and auxiliary filters' old kernels (not bit-exact f32 sums).
+    /// Missing in schema 1/2 projects means legacy; new projects use variance-exact filtering.
+    #[serde(default = "yes")]
+    pub legacy_gaussian_blur: bool,
     /// The project's comment (Metadata panel).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub comment: String,
@@ -265,6 +274,7 @@ impl Default for ProjectSettings {
             frame_start: 0,
             audio_sample_rate: 48_000,
             gpu_acceleration: true,
+            legacy_gaussian_blur: false,
             comment: String::new(),
             color_engine: ColorEngine::Adobe,
             hdr: HdrMode::Clip,

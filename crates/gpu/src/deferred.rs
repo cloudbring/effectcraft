@@ -253,6 +253,7 @@ pub(crate) fn chain_key(chain: &[FxStep], buf: &Buf, levels: Option<f32>) -> u12
         k.debug(&e.working_space);
         k.u64(e.working_linear as u64);
         k.u64(e.float_depth as u64);
+        k.u64(e.legacy_gaussian_blur as u64);
         k.debug(&e.shutter);
     }
     k.finish()
@@ -322,6 +323,26 @@ mod tests {
         c.bytes(b"abc");
         assert_eq!(a.finish(), b.finish());
         assert_ne!(a.finish(), c.finish());
+    }
+
+    #[test]
+    fn gaussian_compatibility_changes_chain_key() {
+        let spec = effectcraft_effects::find("ec.blur.gaussian").unwrap();
+        let params = effectcraft_effects::Params::default();
+        let context = effectcraft_effects::EffectCtx {
+            params: &params,
+            time: 0.0,
+            layer_size: [1.0; 2],
+            seed: 0,
+            adjustment: false,
+            env: effectcraft_effects::EffectEnv::default(),
+        };
+        let buffer = Buf { img: effectcraft_raster::Image::new(1, 1), offset: [0.0; 2], scale: 1.0 };
+        let mut chain = [FxStep { spec, ctx: context }];
+        let modern = chain_key(&chain, &buffer, None);
+        chain[0].ctx.env.legacy_gaussian_blur = true;
+        let legacy = chain_key(&chain, &buffer, None);
+        assert_ne!(modern, legacy);
     }
 
     #[test]

@@ -4,7 +4,6 @@
 
 use effectcraft_keyframe::Value;
 use effectcraft_project::ParamUi;
-use effectcraft_raster::gaussian_blur;
 use rayon::prelude::*;
 
 use crate::util::{Plane, dist_to_poly, gauss_plane, layer_or_self, lerp4, morph_frac, point_in_poly, premul, smoothstep, unpremul};
@@ -30,7 +29,7 @@ fn difference_matte(ctx: &EffectCtx, mut b: Buf) -> Buf {
     let blur = ctx.params.f("blurBeforeDifference") * b.scale;
     let other = layer_or_self(ctx, &b, "differenceLayer", true, ctx.params.e("ifLayerSizesDiffer") == 1);
     let (src, other) = if blur > 0.05 {
-        (gaussian_blur(&b.img, blur * 0.5, blur * 0.5, true), gaussian_blur(&other, blur * 0.5, blur * 0.5, true))
+        (ctx.gaussian_blur(&b.img, blur * 0.5, blur * 0.5, true), ctx.gaussian_blur(&other, blur * 0.5, blur * 0.5, true))
     } else {
         (b.img.clone(), other)
     };
