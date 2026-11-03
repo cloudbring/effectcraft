@@ -21,6 +21,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod bool;
+mod distortion;
 mod lf;
 mod mc;
 mod probs;
@@ -368,16 +369,7 @@ impl Vp9Encoder {
 /// (squared error over the visible area) wins (0 when filtering doesn't help).
 fn choose_level(planes: &mut [Plane; 3], mi: &[Mi], mi_rows: usize, mi_cols: usize, qidx: u8, key: bool) -> u8 {
     let guess = ((qidx as f64 * if key { 0.25 } else { 0.2 }).round() as u8).clamp(1, 63);
-    let sse = |p: &Plane| -> u64 {
-        let mut s = 0u64;
-        for y in 0..p.vis_h {
-            for x in 0..p.vis_w {
-                let d = p.src[y * p.w + x] as i64 - p.rec[y * p.w + x] as i64;
-                s += (d * d) as u64;
-            }
-        }
-        s
-    };
+    let sse = |p: &Plane| -> u64 { distortion::sse_area(&p.src, &p.rec, p.w, p.vis_w, p.vis_h) };
     let mut best = (sse(&planes[0]), 0u8);
     let saved = planes[0].rec.clone();
     for level in [guess / 2, guess, (guess as u16 * 3 / 2).min(63) as u8] {

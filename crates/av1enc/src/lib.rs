@@ -13,6 +13,7 @@
 mod bitw;
 mod cdf;
 mod decide;
+mod distortion;
 mod loopfilter;
 mod pred;
 mod symbol;
@@ -503,20 +504,17 @@ impl Encoder {
     fn pick_filter_level(&self, rec: &[Plane; 3], info: &LfInfo, src: &[Plane; 3], qidx: u8) -> u32 {
         let (w, h) = (self.geom.width, self.geom.height);
         let sb_row_step = if self.geom.sb_rows >= 9 { 3 } else { 1 };
-        let sse = |pl: &Plane| -> u64 {
-            let mut s = 0u64;
-            for y in 0..h {
-                if !(y >> 6).is_multiple_of(sb_row_step) {
-                    continue;
-                }
-                for (a, b) in pl.row(y)[..w].iter().zip(&src[0].row(y)[..w]) {
-                    let d = *a as i64 - *b as i64;
-                    s += (d * d) as u64;
-                }
-            }
-            s
-        };
         let bd = self.cfg.bit_depth as u32;
+        let sse = |pl: &Plane| -> u64 {
+            distortion::sse_visible(
+                bd,
+                distortion::View { data: &pl.data, stride: pl.stride },
+                distortion::View { data: &src[0].data, stride: src[0].stride },
+                w,
+                h,
+                sb_row_step,
+            )
+        };
         let mut cache: Vec<(u32, u64)> = vec![(0, sse(&rec[0]))];
         // one working copy of the luma plane for all candidate levels
         let mut planes = [rec[0].clone(), Plane::new(0, 0), Plane::new(0, 0)];

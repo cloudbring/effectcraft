@@ -6,6 +6,7 @@
 //! syntax this encoder emits: 8×8 and 16×16 blocks, single LAST references, no
 //! `UsePrevFrameMvs` (inter frames are error resilient), no high-precision vectors.
 
+use crate::distortion;
 use crate::mc::{Mv, PhasePlanes, RefPlane, clamp_for_plane, predict};
 use crate::probs::{self, P, Writer, cost, tree_cost};
 use crate::tables::{
@@ -220,21 +221,6 @@ fn probs_defaults() -> &'static probs::Probs {
     use std::sync::OnceLock;
     static D: OnceLock<probs::Probs> = OnceLock::new();
     D.get_or_init(probs::Probs::defaults)
-}
-
-/// SAD of two N×N blocks: per-column 16-bit sums (at most 16 · 255), summed once.
-#[inline(always)]
-fn sad_n<const N: usize>(a: &[u8], sa: usize, b: &[u8], sb: usize) -> u32 {
-    let mut acc = [0u16; N];
-    for i in 0..N {
-        let (Some(ra), Some(rb)) = (a.get(i * sa..).and_then(|r| r.first_chunk::<N>()), b.get(i * sb..).and_then(|r| r.first_chunk::<N>())) else {
-            return u32::MAX / 4;
-        };
-        for j in 0..N {
-            acc[j] += ra[j].abs_diff(rb[j]) as u16;
-        }
-    }
-    acc.iter().map(|&v| v as u32).sum()
 }
 
 // ---------------------------------------------------------------- the tile
@@ -614,30 +600,15 @@ impl<'a> Tile<'a> {
     fn sad(&self, r: usize, c: usize, n: usize, mv: Mv) -> u32 {
         let p = &self.planes[0];
         let (x16, y16) = (((c * 8) << 4) as i32 + 2 * mv.col, ((r * 8) << 4) as i32 + 2 * mv.row);
-        let mut s = 0u32;
+        let origin = (r * 8) * p.w + c * 8;
         if let Some((pl, o, st)) = self.f.phases.as_ref().and_then(|ph| ph.block(x16, y16, n)) {
-            let a = &p.src[(r * 8) * p.w + c * 8..];
-            let b = &pl[o..];
-            return match n {
-                8 => sad_n::<8>(a, p.w, b, st),
-                16 => sad_n::<16>(a, p.w, b, st),
-                _ => {
-                    for i in 0..n {
-                        s += a[i * p.w..][..n].iter().zip(&b[i * st..][..n]).map(|(a, b)| a.abs_diff(*b) as u32).sum::<u32>();
-                    }
-                    s
-                }
-            };
+            return distortion::sad_block(&p.src[origin..], p.w, &pl[o..], st, n);
         }
         // Inter search only runs on frames with a reference.
         let Some(refs) = self.f.refs.as_ref() else { return u32::MAX / 4 };
         let mut pred = [0u8; 256];
-        predict(&refs[0], x16, y16, n, n, &mut pred);
-        for i in 0..n {
-            let a = &p.src[(r * 8 + i) * p.w + c * 8..][..n];
-            s += a.iter().zip(&pred[i * n..i * n + n]).map(|(a, b)| (*a as i32 - *b as i32).unsigned_abs()).sum::<u32>();
-        }
-        s
+        predict(&refs[0], x16, y16, n, n, &mut pred[..n * n]);
+        distortion::sad_block(&p.src[origin..], p.w, &pred[..n * n], n, n)
     }
 
     /// Motion search for the block at (`r`, `c`): the best vector and its cost

@@ -3,6 +3,7 @@
 //! processes, so the reconstruction built here is exactly what a decoder produces; the syntax
 //! is written afterwards by `writer.rs`.
 
+use crate::distortion::{self, SadRef};
 use crate::pred::{INTRA_MODES_USED, InterBlock, IntraEdge, Plane, edges, half_planes, predict_inter, predict_intra};
 use crate::tables::{
     AC_QLOOKUP, BLOCK_8X8, BLOCK_64X64, DC_PRED, DC_QLOOKUP, DCT_DCT, DEFAULT_SCAN_4X4, DEFAULT_SCAN_8X8, DEFAULT_SCAN_16X16, DEFAULT_SCAN_32X32, MODE_TO_TXFM,
@@ -180,6 +181,10 @@ pub(crate) struct Decider<'a> {
     lambda_sad: f64,
     /// Half-sample interpolations of the reference luma (visible area): (8, 0), (0, 8), (8, 8).
     half: [Vec<u16>; 3],
+    /// 8-bit copies of `src` and the reference luma. Empty when `bd > 8` (the shared
+    /// distortion kernels are 8-bit; 10-bit scores stay on `distortion::scalar`).
+    src8: [Vec<u8>; 3],
+    ref8: Vec<u8>,
     /// Transform buffers, taken out while a block is being tried (see `code_tx`).
     scratch: Option<Box<TxScratch>>,
 }
@@ -221,6 +226,8 @@ impl<'a> Decider<'a> {
                 Some(rf) => half_planes(&rf.planes[0], g.width, g.height, bd),
                 None => Default::default(),
             },
+            src8: if bd <= 8 { std::array::from_fn(|p| src[p].data.iter().map(|&s| s as u8).collect()) } else { Default::default() },
+            ref8: if bd <= 8 { refr.map(|rf| rf.planes[0].data.iter().map(|&s| s as u8).collect()).unwrap_or_default() } else { Vec::new() },
             scratch: None,
         }
     }
@@ -743,57 +750,46 @@ impl<'a> Decider<'a> {
         let (vw, vh) = (self.g.width, self.g.height);
         let w = n.min(vw.saturating_sub(x));
         let h = n.min(vh.saturating_sub(y));
-        let src = &self.src[0];
-        let (lx, ly) = (vw as i32 - 1, vh as i32 - 1);
-        let mut sad = 0u64;
-        let inside = rx >= 0 && ry >= 0 && rx + w as i32 - 1 <= lx && ry + h as i32 - 1 <= ly;
-        for i in 0..h {
-            let s = &src.row(y + i)[x..x + w];
-            let rr = refp.row((ry + i as i32).clamp(0, ly) as usize);
-            if inside {
-                let rrow = &rr[rx as usize..rx as usize + w];
-                sad += s.iter().zip(rrow).map(|(&a, &b)| (a as i32 - b as i32).unsigned_abs()).sum::<u32>() as u64;
-            } else {
-                for j in 0..w {
-                    let b = rr[(rx + j as i32).clamp(0, lx) as usize];
-                    sad += (s[j] as i32 - b as i32).unsigned_abs() as u64;
-                }
-            }
+        if w == 0 || h == 0 {
+            return 0;
         }
-        sad
+        if self.bd <= 8 {
+            return distortion::sad_ref8(&SadRef {
+                src: &self.src8[0],
+                src_stride: self.src[0].stride,
+                reference: &self.ref8,
+                ref_stride: refp.stride,
+                rx,
+                ry,
+                x,
+                y,
+                w,
+                h,
+                visible: (vw as i32, vh as i32),
+            });
+        }
+        let stride = self.src[0].stride;
+        distortion::scalar::sad_ref(&distortion::scalar::Clamped {
+            src: &self.src[0].data[y * stride + x..],
+            stride,
+            reference: &refp.data,
+            ref_stride: refp.stride,
+            rx,
+            ry,
+            w,
+            h,
+            visible: (vw as i32, vh as i32),
+        })
     }
 
     /// Sum of absolute Hadamard-transformed differences (4x4 or 8x8 sub-blocks) of a prediction
     /// against the source, scaled to about the size of the SAD.
     fn satd(&self, p: usize, x: usize, y: usize, n: usize, pred: &[u16]) -> u64 {
-        let src = &self.src[p];
-        let k = n.min(8);
-        let mut total = 0u64;
-        let mut d = [0i32; 64];
-        for by in (0..n).step_by(k) {
-            for bx in (0..n).step_by(k) {
-                for i in 0..k {
-                    let row = &src.row(y + by + i)[x + bx..x + bx + k];
-                    for j in 0..k {
-                        d[i * k + j] = row[j] as i32 - pred[(by + i) * n + bx + j] as i32;
-                    }
-                }
-                for i in 0..k {
-                    hadamard(&mut d[i * k..i * k + k]);
-                }
-                let mut col = [0i32; 8];
-                let mut s = 0u64;
-                for j in 0..k {
-                    for i in 0..k {
-                        col[i] = d[i * k + j];
-                    }
-                    hadamard(&mut col[..k]);
-                    s += col[..k].iter().map(|v| v.unsigned_abs() as u64).sum::<u64>();
-                }
-                total += s / (k as u64 / 2);
-            }
+        let stride = self.src[p].stride;
+        if self.bd <= 8 {
+            return distortion::satd8(&self.src8[p][y * stride + x..], stride, pred, n);
         }
-        total
+        distortion::scalar::satd(&self.src[p].data[y * stride + x..], stride, pred, n, n)
     }
 
     /// SAD of a prediction against the source over the visible part of the block.
@@ -801,33 +797,28 @@ impl<'a> Decider<'a> {
         let (vw, vh) = self.g.visible(p);
         let w = n.min(vw.saturating_sub(x));
         let h = n.min(vh.saturating_sub(y));
-        let src = &self.src[p];
-        let mut s = 0u64;
-        for i in 0..h {
-            let row = &src.row(y + i)[x..x + w];
-            s += row.iter().zip(&pred[i * n..i * n + w]).map(|(&a, &b)| (a as i32 - b as i32).unsigned_abs()).sum::<u32>() as u64;
+        if w == 0 || h == 0 {
+            return 0;
         }
-        s
+        let stride = self.src[p].stride;
+        if self.bd <= 8 {
+            return distortion::sad8(&self.src8[p][y * stride + x..], stride, pred, n, w, h);
+        }
+        distortion::scalar::sad(&self.src[p].data[y * stride + x..], stride, pred, n, w, h)
     }
 
     fn sse(&self, p: usize, x: usize, y: usize, n: usize, blk: &[u16]) -> f64 {
         let (vw, vh) = self.g.visible(p);
         let w = n.min(vw.saturating_sub(x));
         let h = n.min(vh.saturating_sub(y));
-        let src = &self.src[p];
-        let mut s = 0u64;
-        for i in 0..h {
-            let row = &src.row(y + i)[x..x + w];
-            s += row
-                .iter()
-                .zip(&blk[i * n..i * n + w])
-                .map(|(&a, &b)| {
-                    let d = a as i64 - b as i64;
-                    (d * d) as u64
-                })
-                .sum::<u64>();
+        if w == 0 || h == 0 {
+            return 0.0;
         }
-        s as f64
+        let stride = self.src[p].stride;
+        if self.bd <= 8 {
+            return distortion::sse8(&self.src8[p][y * stride + x..], stride, blk, n, w, h);
+        }
+        distortion::scalar::sse(&self.src[p].data[y * stride + x..], stride, blk, n, w, h) as f64
     }
 
     fn put(&mut self, p: usize, x: usize, y: usize, n: usize, blk: &[u16]) {
@@ -954,21 +945,6 @@ fn log2_of(table: &[f64; LOG2_TABLE_LEN], v: usize) -> f64 {
 }
 
 /// Unnormalised Walsh-Hadamard transform of 4 or 8 values, in place.
-fn hadamard(v: &mut [i32]) {
-    let n = v.len();
-    let mut h = 1;
-    while h < n {
-        for i in (0..n).step_by(2 * h) {
-            for j in i..i + h {
-                let (a, b) = (v[j], v[j + h]);
-                v[j] = a + b;
-                v[j + h] = a - b;
-            }
-        }
-        h *= 2;
-    }
-}
-
 /// Rough coefficient coding cost in bits.
 fn estimate_bits(levels: &[i32], tx_sz: usize) -> f64 {
     let scan = scan_for(tx_sz);

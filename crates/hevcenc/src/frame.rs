@@ -3,6 +3,7 @@
 //! and residual coding. Reconstruction mirrors the decoding process exactly (no in-loop filters).
 
 use crate::cabac::{BIT, CabacEncoder, Estimator, Sink};
+use crate::distortion;
 use crate::inter::{self, PlaneRef};
 use crate::intra::{self, Refs};
 use crate::me::MeRef;
@@ -127,6 +128,8 @@ pub struct FrameCoder<'a> {
     lambda: f64,
     lambda_sad: f64,
     src: &'a [Vec<u16>; 3],
+    /// 8-bit luma (`src[0]`). Empty when `bd > 8`.
+    luma8: Vec<u8>,
     pub rec: [Vec<u16>; 3],
     refp: Option<&'a [Vec<u16>; 3]>,
     me: Option<&'a MeRef>,
@@ -175,6 +178,7 @@ impl<'a> FrameCoder<'a> {
             lambda,
             lambda_sad: lambda.sqrt(),
             src,
+            luma8: if bd <= 8 { src[0].iter().map(|&s| s as u8).collect() } else { Vec::new() },
             rec: [vec![0; w * h], vec![0; w * h / 4], vec![0; w * h / 4]],
             refp,
             me,
@@ -918,7 +922,7 @@ impl<'a> FrameCoder<'a> {
                 continue;
             }
             me.approx_pred(x as i32, y as i32, n, mv, &mut buf);
-            let satd = satd(&self.src[0][y * self.w + x..], self.w, &buf, n, n) as u64;
+            let satd = distortion::satd(self.bd, &self.src[0][y * self.w + x..], self.w, &buf, n, n) as u64;
             let cost = satd + (self.lambda_sad * (i + 1) as f64) as u64;
             if cost < best.1 {
                 best = (i, cost);
@@ -932,11 +936,12 @@ impl<'a> FrameCoder<'a> {
         let Some(me) = self.me else { return (amvp[0], 0, u64::MAX / 4) };
         let (xi, yi) = (x as i32, y as i32);
         let src = &self.src[0][y * self.w + x..];
+        let src8: &[u8] = if self.bd <= 8 { &self.luma8[y * self.w + x..] } else { &[] };
         let ls = self.lambda_sad;
         let mv_bits = |mv: [i32; 2]| -> f64 { amvp.iter().map(|p| mvd_bits(mv[0] - p[0] as i32) + mvd_bits(mv[1] - p[1] as i32)).fold(f64::MAX, f64::min) };
         let (lo_x, hi_x, lo_y, hi_y) = me.int_range(xi, yi, n);
         let clamp_i = |v: [i32; 2]| [v[0].clamp(lo_x, hi_x), v[1].clamp(lo_y, hi_y)];
-        let sad_cost = |v: [i32; 2]| -> f64 { me.sad(src, self.w, xi + v[0], yi + v[1], n) as f64 + ls * mv_bits([v[0] * 4, v[1] * 4]) };
+        let sad_cost = |v: [i32; 2]| -> f64 { me.sad(src, src8, self.w, xi + v[0], yi + v[1], n) as f64 + ls * mv_bits([v[0] * 4, v[1] * 4]) };
         // starting points
         let mut best = [0i32; 2];
         let mut best_cost = sad_cost(best);
@@ -976,7 +981,7 @@ impl<'a> FrameCoder<'a> {
         let mut buf = vec![0u16; n * n];
         let mut satd_cost = |mv: [i32; 2]| -> f64 {
             me.approx_pred(xi, yi, n, [mv[0] as i16, mv[1] as i16], &mut buf);
-            satd(src, self.w, &buf, n, n) as f64 + ls * mv_bits(mv)
+            distortion::satd(self.bd, src, self.w, &buf, n, n) as f64 + ls * mv_bits(mv)
         };
         let mut bq = [best[0] * 4, best[1] * 4];
         let mut bc = satd_cost(bq);
@@ -1011,7 +1016,7 @@ impl<'a> FrameCoder<'a> {
                 Some(_) => 3.0,
                 None => 6.0,
             };
-            satd(src, self.w, &buf, n, n) as u64 + (self.lambda_sad * bits) as u64
+            distortion::satd(self.bd, src, self.w, &buf, n, n) as u64 + (self.lambda_sad * bits) as u64
         };
         let mut best = (1u32, u64::MAX);
         let mut tried = [false; 35];
@@ -1386,81 +1391,6 @@ fn residual_coding<S: Sink>(s: &mut S, lv: &[i32], log2: u32, c: usize, scan_idx
         }
         write_coefficient_levels(s, &sig[..nsig], |p| at(xs, ys, p), i, c, &mut prev_g1);
     }
-}
-
-/// Sum of absolute Hadamard-transformed differences (8x8 blocks, 4x4 for 4-sample blocks).
-pub fn satd(src: &[u16], ss: usize, pred: &[u16], ps: usize, n: usize) -> u32 {
-    if n == 4 {
-        return satd4(src, ss, pred, ps);
-    }
-    let mut total = 0;
-    for by in (0..n).step_by(8) {
-        for bx in (0..n).step_by(8) {
-            total += satd8(&src[by * ss + bx..], ss, &pred[by * ps + bx..], ps);
-        }
-    }
-    total
-}
-
-fn satd4(src: &[u16], ss: usize, pred: &[u16], ps: usize) -> u32 {
-    let mut d = [0i32; 16];
-    for y in 0..4 {
-        for x in 0..4 {
-            d[y * 4 + x] = src[y * ss + x] as i32 - pred[y * ps + x] as i32;
-        }
-    }
-    let mut m = [0i32; 16];
-    for y in 0..4 {
-        let r = &d[y * 4..y * 4 + 4];
-        let (a, b, c, e) = (r[0] + r[3], r[1] + r[2], r[1] - r[2], r[0] - r[3]);
-        m[y * 4] = a + b;
-        m[y * 4 + 1] = e + c;
-        m[y * 4 + 2] = a - b;
-        m[y * 4 + 3] = e - c;
-    }
-    let mut sum = 0;
-    for x in 0..4 {
-        let (r0, r1, r2, r3) = (m[x], m[4 + x], m[8 + x], m[12 + x]);
-        let (a, b, c, e) = (r0 + r3, r1 + r2, r1 - r2, r0 - r3);
-        sum += (a + b).abs() + (e + c).abs() + (a - b).abs() + (e - c).abs();
-    }
-    ((sum + 1) >> 1) as u32
-}
-
-fn hadamard8(v: &mut [i32; 8]) {
-    let mut t = *v;
-    let mut h = 1;
-    while h < 8 {
-        for i in (0..8).step_by(h * 2) {
-            for j in i..i + h {
-                let (a, b) = (t[j], t[j + h]);
-                t[j] = a + b;
-                t[j + h] = a - b;
-            }
-        }
-        h *= 2;
-    }
-    *v = t;
-}
-
-fn satd8(src: &[u16], ss: usize, pred: &[u16], ps: usize) -> u32 {
-    let mut m = [[0i32; 8]; 8];
-    for y in 0..8 {
-        for x in 0..8 {
-            m[y][x] = src[y * ss + x] as i32 - pred[y * ps + x] as i32;
-        }
-        hadamard8(&mut m[y]);
-    }
-    let mut sum = 0;
-    for x in 0..8 {
-        let mut col = [0i32; 8];
-        for y in 0..8 {
-            col[y] = m[y][x];
-        }
-        hadamard8(&mut col);
-        sum += col.iter().map(|v| v.abs()).sum::<i32>();
-    }
-    ((sum + 2) >> 2) as u32
 }
 
 #[cfg(test)]

@@ -1090,6 +1090,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-distortion"
+version = "0.1.0"
+source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2F99-craft-distortion#1b6b802e374bd59c028a86f67d88bd17bfe913c1"
+dependencies = [
+ "wide",
+]
+
+[[package]]
 name = "craft-docpath"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13afff77f38b5c11b73aa0#92d392cff132eaf53e13afff77f38b5c11b73aa0"
@@ -1453,6 +1461,7 @@ dependencies = [
 name = "effectcraft-av1enc"
 version = "0.21.0"
 dependencies = [
+ "craft-distortion",
  "filmcraft-av1",
 ]
 
@@ -1620,6 +1629,7 @@ dependencies = [
 name = "effectcraft-hevcenc"
 version = "0.21.0"
 dependencies = [
+ "craft-distortion",
  "filmcraft-hevc",
 ]
 
@@ -1966,6 +1976,9 @@ dependencies = [
 [[package]]
 name = "effectcraft-vp9enc"
 version = "0.21.0"
+dependencies = [
+ "craft-distortion",
+]
 
 [[package]]
 name = "effectcraft-web"
@@ -5340,6 +5353,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
 
 [[package]]
+name = "safe_arch"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42c6efa15875e6ecb39ca61fb0b0c1a40b84fac5a5ffe71eef7d1000c8eb3f5f"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "safetensors"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7093,6 +7115,16 @@ dependencies = [
  "raw-window-handle",
  "static_assertions",
  "web-sys",
+]
+
+[[package]]
+name = "wide"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d920ac99c3c8edce110cb8d07dbb324d6d026011dce85b1e9355b70f0adacc4f"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
 ]
 
 [[package]]

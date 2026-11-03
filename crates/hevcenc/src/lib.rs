@@ -19,6 +19,7 @@
 mod bitstream;
 mod cabac;
 mod deblock;
+mod distortion;
 mod frame;
 mod inter;
 mod intra;

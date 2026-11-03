@@ -10,6 +10,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+craft-distortion = { workspace = true }
 
 [dev-dependencies]
 filmcraft-hevc = { workspace = true }

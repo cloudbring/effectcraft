@@ -3,6 +3,7 @@
 //! approximated by averaging neighbouring half-grid samples. Used for estimation only; the coded
 //! prediction always uses the normative interpolation in `inter`.
 
+use crate::distortion;
 use crate::tables::LUMA_FILTER;
 
 const MARGIN: i32 = 80;
@@ -10,10 +11,13 @@ const MARGIN: i32 = 80;
 pub struct MeRef {
     /// [integer, horizontal half, vertical half, diagonal half] samples, each `stride` x `rows`.
     planes: [Vec<u16>; 4],
+    /// 8-bit integer plane. Empty when `bd > 8`.
+    y8: Vec<u8>,
     stride: usize,
     rows: usize,
     w: i32,
     h: i32,
+    bd: u32,
 }
 
 impl MeRef {
@@ -68,7 +72,8 @@ impl MeRef {
         let hp = filt_h(&pad);
         let vp = filt_v(&pad);
         let dp = filt_v(&hp);
-        MeRef { planes: [pad, hp, vp, dp], stride, rows, w: w as i32, h: h as i32 }
+        let y8 = if bd <= 8 { pad.iter().map(|&s| s as u8).collect() } else { Vec::new() };
+        MeRef { planes: [pad, hp, vp, dp], y8, stride, rows, w: w as i32, h: h as i32, bd }
     }
 
     /// Integer motion vector range keeping an n x n block (plus filter margin) inside the padding.
@@ -82,16 +87,13 @@ impl MeRef {
     }
 
     /// SAD of the source block against the integer-position reference block at (rx, ry).
-    pub fn sad(&self, src: &[u16], ss: usize, rx: i32, ry: i32, n: usize) -> u32 {
-        let p = &self.planes[0];
+    /// `src8` is the 8-bit source (used when `bd <= 8`; pass `&[]` otherwise).
+    pub fn sad(&self, src: &[u16], src8: &[u8], ss: usize, rx: i32, ry: i32, n: usize) -> u32 {
         let base = (ry + MARGIN) as usize * self.stride + (rx + MARGIN) as usize;
-        let mut s = 0u32;
-        for r in 0..n {
-            let a = &src[r * ss..r * ss + n];
-            let b = &p[base + r * self.stride..base + r * self.stride + n];
-            s += a.iter().zip(b).map(|(&x, &y)| (x as i32 - y as i32).unsigned_abs()).sum::<u32>();
+        if self.bd <= 8 {
+            return distortion::sad8(src8, ss, &self.y8[base..], self.stride, n);
         }
-        s
+        distortion::sad10(src, ss, &self.planes[0][base..], self.stride, n)
     }
 
     /// Approximate luma prediction of an n x n block at (x, y) with quarter-sample vector `mv`.
