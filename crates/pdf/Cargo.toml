@@ -10,11 +10,13 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+craft-archive.workspace = true
 craft-pdf.workspace = true
 effectcraft-svg = { workspace = true }
 kurbo = { workspace = true }
 effectcraft-text = { workspace = true }
 miniz_oxide = "0.9"
+weezl = "0.1.12"
 # Embedded TrueType / OpenType font programs (MIT OR Apache-2.0).
 skrifa = { workspace = true }
 # DCT (JPEG) images (MIT OR Apache-2.0 OR Zlib; pure Rust).

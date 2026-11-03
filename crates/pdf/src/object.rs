@@ -351,7 +351,9 @@ pub fn decode_stream_within(file: &File, d: &Dict, raw: &[u8], max: usize) -> Op
                 lzw(&data, parms.get(i).and_then(|p| p.as_ref()).and_then(|p| p.get("EarlyChange")).and_then(Obj::num).unwrap_or(1.0) != 0.0, max)?
             }
             "RunLengthDecode" | "RL" => run_length(&data, max)?,
-            "CCITTFaxDecode" | "CCF" => crate::ccitt::decode(&data, &ccitt_params(file, parms.get(i).and_then(|p| p.as_ref())), max)?,
+            "CCITTFaxDecode" | "CCF" => {
+                crate::ccitt::decode(&data, &ccitt_params(file, parms.get(i).and_then(|p| p.as_ref())), limits_for(&data, max, craft_archive::Wrapper::Raw))?
+            }
             _ => return None,
         };
         if data.len() > max {
@@ -384,22 +386,36 @@ fn ccitt_params(file: &File, d: Option<&Dict>) -> crate::ccitt::Params {
     p
 }
 
+pub(crate) fn limits_for(data: &[u8], max: usize, wrapper: craft_archive::Wrapper) -> craft_archive::Limits {
+    craft_archive::Limits { max_output: max as u64, max_input: data.len() as u64, max_ratio: (max as u64).max(1), wrapper }
+}
+
 /// Inflate zlib data (or raw deflate) to at most `max` bytes. A stream that inflates to more is
 /// undecodable (`None`), not salvaged as a truncated one.
 pub fn inflate(data: &[u8], max: usize) -> Option<Vec<u8>> {
-    use miniz_oxide::inflate::{TINFLStatus, decompress_to_vec_with_limit, decompress_to_vec_zlib_with_limit};
-    for attempt in [decompress_to_vec_zlib_with_limit, decompress_to_vec_with_limit] {
-        match attempt(data, max) {
-            Ok(v) => return Some(v),
-            Err(e) if e.status == TINFLStatus::HasMoreOutput => return None,
+    use craft_archive::{BoundedInflate, InflateError, Wrapper, inflate_bounded};
+    for wrapper in [Wrapper::Zlib, Wrapper::Raw] {
+        match inflate_bounded(data, limits_for(data, max, wrapper)) {
+            Ok(output) => return Some(output),
+            Err(InflateError::OutputLimit { .. } | InflateError::RatioLimit) => return None,
             Err(_) => {}
         }
     }
-    // Truncated streams: keep what inflates.
-    let mut d = miniz_oxide::inflate::stream::InflateState::new_boxed(miniz_oxide::DataFormat::Zlib);
-    let mut out = vec![0u8; salvage_len(data.len(), max)];
-    let r = miniz_oxide::inflate::stream::inflate(&mut d, data, &mut out, miniz_oxide::MZFlush::Finish);
-    (r.bytes_written > 0).then(|| out[..r.bytes_written].to_vec())
+    let salvage_max = salvage_len(data.len(), max);
+    let mut decoder = BoundedInflate::new(data, limits_for(data, salvage_max, Wrapper::Zlib)).ok()?;
+    let mut output = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        match decoder.read_chunk(&mut buffer) {
+            Ok(0) | Err(InflateError::Truncated | InflateError::Corrupt) => break,
+            Ok(length) => {
+                output.try_reserve(length).ok()?;
+                output.extend_from_slice(&buffer[..length]);
+            }
+            Err(_) => return None,
+        }
+    }
+    (!output.is_empty()).then_some(output)
 }
 
 /// The buffer [`inflate`] salvages a truncated stream of `data_len` bytes into: eight times that
@@ -484,58 +500,28 @@ fn ascii85_within(data: &[u8], max: usize) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn lzw(data: &[u8], early: bool, max: usize) -> Option<Vec<u8>> {
-    let mut out = vec![];
-    let mut table: Vec<Vec<u8>> = (0..=255u16).map(|b| vec![b as u8]).collect();
-    table.push(vec![]);
-    table.push(vec![]);
-    let (mut bits, mut acc, mut nbits) = (9u32, 0u32, 0u32);
-    let mut prev: Option<Vec<u8>> = None;
-    for &b in data {
-        acc = (acc << 8) | b as u32;
-        nbits += 8;
-        while nbits >= bits {
-            let code = ((acc >> (nbits - bits)) & ((1 << bits) - 1)) as usize;
-            nbits -= bits;
-            match code {
-                256 => {
-                    table.truncate(258);
-                    bits = 9;
-                    prev = None;
-                    continue;
-                }
-                257 => return Some(out),
-                _ => {}
-            }
-            let entry = if code < table.len() {
-                table[code].clone()
-            } else if let Some(p) = &prev {
-                let mut e = p.clone();
-                e.push(p[0]);
-                e
-            } else {
-                return Some(out);
-            };
-            if out.len().checked_add(entry.len())? > max {
-                return None;
-            }
-            out.extend_from_slice(&entry);
-            // PDF codes have at most 12 bits. Freeze a full table until a clear code.
-            if let Some(p) = prev
-                && table.len() < 4096
-            {
-                let mut e = p;
-                e.push(entry[0]);
-                table.push(e);
-            }
-            prev = Some(entry);
-            let limit = table.len() + usize::from(early);
-            if limit >= (1 << bits) && bits < 12 {
-                bits += 1;
-            }
+pub(crate) fn lzw(data: &[u8], early: bool, max: usize) -> Option<Vec<u8>> {
+    use weezl::{BitOrder, LzwStatus, decode::Decoder};
+    let mut decoder = if early { Decoder::with_tiff_size_switch(BitOrder::Msb, 8) } else { Decoder::new(BitOrder::Msb, 8) };
+    let mut output = Vec::new();
+    let mut input = data;
+    let mut buffer = [0u8; 8192];
+    loop {
+        let available = buffer.len().min(max.saturating_sub(output.len()).saturating_add(1));
+        let result = decoder.decode_bytes(input, &mut buffer[..available]);
+        if output.len().checked_add(result.consumed_out)? > max {
+            return None;
+        }
+        output.try_reserve(result.consumed_out).ok()?;
+        output.extend_from_slice(&buffer[..result.consumed_out]);
+        input = input.get(result.consumed_in..)?;
+        match result.status {
+            Ok(LzwStatus::Done) => return Some(output),
+            Err(_) | Ok(LzwStatus::NoProgress) => return Some(output),
+            Ok(LzwStatus::Ok) if result.consumed_in == 0 && result.consumed_out == 0 => return Some(output),
+            Ok(LzwStatus::Ok) => {}
         }
     }
-    Some(out)
 }
 
 fn run_length(data: &[u8], max: usize) -> Option<Vec<u8>> {

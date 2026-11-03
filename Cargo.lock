@@ -1090,6 +1090,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-archive"
+version = "0.1.0"
+source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#249cbcc191bbf14558577677b239a45a7e724c72"
+dependencies = [
+ "flate2",
+ "thiserror 2.0.21",
+ "zip 9.1.3",
+]
+
+[[package]]
 name = "craft-docpath"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13afff77f38b5c11b73aa0#92d392cff132eaf53e13afff77f38b5c11b73aa0"
@@ -1765,6 +1775,7 @@ dependencies = [
 name = "effectcraft-pdf"
 version = "0.21.0"
 dependencies = [
+ "craft-archive",
  "craft-pdf",
  "effectcraft-raster",
  "effectcraft-svg",
@@ -1774,6 +1785,7 @@ dependencies = [
  "miniz_oxide 0.9.1",
  "skrifa",
  "wasm-bindgen-test",
+ "weezl",
  "zune-jpeg",
 ]
 
@@ -1807,6 +1819,7 @@ dependencies = [
 name = "effectcraft-psd"
 version = "0.21.0"
 dependencies = [
+ "craft-archive",
  "miniz_oxide 0.9.1",
 ]
 

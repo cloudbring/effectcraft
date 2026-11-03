@@ -10,7 +10,7 @@ records, channel image data, layer mask data, additional layer information: `lun
 `lyid`, `iOpa`, `TySh`, `lfx2`, `SoCo`, `nvrt`, `brit`, `hue2`, `levl`, `expA`, `vmsk`/`vsms`,
 `Lr16`/`Lr32`, smart objects: `SoLd`/`SoLE`/`PlLd` placement and `lnk2`/`lnkD`/`lnk3`/`lnkE`
 linked layer data with embedded files), the descriptor (action) structure, and the merged image data. Raw, RLE (PackBits)
-and ZIP (with and without prediction, inflated with `miniz_oxide`) compression; 1/8/16/32-bit;
+and ZIP (with and without prediction, inflated with bounded `craft-archive`) compression; 1/8/16/32-bit;
 Bitmap, Grayscale, Indexed, RGB, CMYK (naive conversion) and Lab colour modes.
 
 Text engine data (`EngineData`) is read best-effort for the font, size, fill colour and

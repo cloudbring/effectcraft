@@ -30,8 +30,9 @@ ffmpeg elsewhere) to check the code tables against an independent implementation
   compatibility repair recovers referenced objects from object streams when damaged xrefs omit
   them; every recovery or unresolved reference is reported in `Doc::skipped` (up to 64 messages).
   The existing page tree preserves inherited resources, MediaBox / CropBox and `/Rotate`.
-  Content/image filters remain app-owned: Flate (with PNG predictors), LZW, ASCIIHex, ASCII85,
-  RunLength and CCITTFax. Encrypted files remain refused; `page_count` returns zero when the
+  Content/image filter orchestration remains app-owned: Flate uses bounded `craft-archive` (with
+  PNG predictors), LZW uses `weezl`, and ASCIIHex, ASCII85, RunLength and CCITTFax stay local.
+  Encrypted files remain refused; `page_count` returns zero when the
   reader refuses a document.
 - **Content:** `q`/`Q`, `cm`, line width / cap / join / miter / dash, ExtGState (`CA`, `ca`, `LW`,
   `LC`, `LJ`, `ML`, `D`), all path construction and painting operators (non-zero and even-odd),

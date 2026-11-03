@@ -494,7 +494,11 @@ fn pack(changes: &[usize], columns: usize, black_is_1: bool, out: &mut Vec<u8>) 
 
 /// Decode CCITT fax data. Damaged data ends the image at the last good row (rows already
 /// decoded are kept); `None` when no row decodes or the output would exceed `max`.
-pub fn decode(data: &[u8], p: &Params, max: usize) -> Option<Vec<u8>> {
+pub fn decode(data: &[u8], p: &Params, limits: craft_archive::Limits) -> Option<Vec<u8>> {
+    if (data.len() as u64) > limits.max_input {
+        return None;
+    }
+    let max = usize::try_from(limits.max_output).unwrap_or(usize::MAX);
     let columns = p.columns.clamp(1, 1 << 16);
     let max_rows = if p.rows > 0 { p.rows.min(1 << 20) } else { 1 << 20 };
     let row_bytes = columns.checked_add(7)? / 8;
@@ -554,6 +558,10 @@ pub fn decode(data: &[u8], p: &Params, max: usize) -> Option<Vec<u8>> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    fn decode(data: &[u8], params: &Params, max: usize) -> Option<Vec<u8>> {
+        super::decode(data, params, crate::object::limits_for(data, max, craft_archive::Wrapper::Raw))
+    }
 
     /// A bit writer for the test encoder.
     #[derive(Default)]
@@ -803,5 +811,19 @@ pub(crate) mod tests {
             let _ = decode(&garbage, &Params { k, columns: 64, rows: 20, ..Params::default() }, 1 << 20);
             let _ = decode(&garbage, &Params { k, columns: 1, rows: 0, ..Params::default() }, 1 << 20);
         }
+    }
+
+    #[test]
+    fn ccitt_input_and_output_share_the_pdf_limits() {
+        let image = pattern(64, 8, 9);
+        let data = encode(&image, -1);
+        let params = Params { k: -1, columns: 64, rows: 8, ..Params::default() };
+        let mut limits = crate::object::limits_for(&data, 64, craft_archive::Wrapper::Raw);
+        assert_eq!(super::decode(&data, &params, limits).map(|bytes| bytes.len()), Some(64));
+        limits.max_input = data.len() as u64 - 1;
+        assert_eq!(super::decode(&data, &params, limits), None);
+        limits.max_input = data.len() as u64;
+        limits.max_output = 63;
+        assert_eq!(super::decode(&data, &params, limits), None);
     }
 }

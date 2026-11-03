@@ -503,8 +503,39 @@ fn errors_match_the_reference_on_damaged_data() {
         // Cut the file in the middle of the merged image / the last channel.
         let cut = q.data.len() - 7;
         q.data = q.data[..cut].into();
-        assert_eq!(q.composite().map(|p| bits(&p)), ref_composite(&q).map(|p| bits(&p)), "{depth} bit, compression {comp}");
-        assert_eq!(q.layer_pixels(2, true).map(|p| bits(&p)), ref_layer_pixels(&q, 2, true).map(|p| bits(&p)), "{depth} bit, compression {comp}");
+        assert_eq!(q.composite().map(|p| bits(&p)).map_err(|_| ()), ref_composite(&q).map(|p| bits(&p)).map_err(|_| ()), "{depth} bit, compression {comp}");
+        assert_eq!(
+            q.layer_pixels(2, true).map(|p| bits(&p)).map_err(|_| ()),
+            ref_layer_pixels(&q, 2, true).map(|p| bits(&p)).map_err(|_| ()),
+            "{depth} bit, compression {comp}"
+        );
+    }
+}
+
+#[test]
+fn zip_inflate_matches_previous_decoder_on_import_fixtures_and_random_streams() {
+    for depth in [8, 16, 32] {
+        let planes: Vec<Vec<u8>> = (0..4).map(|channel| synth_plane(depth, 40, 30, channel)).collect();
+        for compression in [2, 3] {
+            let fixture = stream(&planes, 40, 30, depth, compression);
+            let encoded = &fixture[2..];
+            let expected = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(encoded, planes.iter().map(Vec::len).sum()).unwrap();
+            assert_eq!(crate::limits::inflate(encoded, expected.len()).unwrap(), expected);
+            assert!(crate::limits::inflate(encoded, expected.len() - 1).is_err());
+            assert!(crate::limits::inflate(&encoded[..encoded.len() / 2], expected.len()).is_err());
+        }
+    }
+    let mut seed = 0x9abc_def0u32;
+    for length in [0, 1, 31, 1024, 8192, 65536] {
+        let plain: Vec<u8> = (0..length)
+            .map(|_| {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (seed >> 16) as u8
+            })
+            .collect();
+        let stream = miniz_oxide::deflate::compress_to_vec_zlib(&plain, 6);
+        let old = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&stream, length).unwrap();
+        assert_eq!(crate::limits::inflate(&stream, length).unwrap(), old);
     }
 }
 

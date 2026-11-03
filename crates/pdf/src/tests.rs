@@ -273,6 +273,104 @@ fn lzw_codes(codes: impl IntoIterator<Item = u16>, early: bool) -> Vec<u8> {
     w.bytes
 }
 
+fn old_lzw(data: &[u8], early: bool, max: usize) -> Option<Vec<u8>> {
+    let mut out = vec![];
+    let mut table: Vec<Vec<u8>> = (0..=255u16).map(|value| vec![value as u8]).collect();
+    table.push(vec![]);
+    table.push(vec![]);
+    let (mut bits, mut acc, mut nbits) = (9u32, 0u32, 0u32);
+    let mut prev: Option<Vec<u8>> = None;
+    for &byte in data {
+        acc = (acc << 8) | byte as u32;
+        nbits += 8;
+        while nbits >= bits {
+            let code = ((acc >> (nbits - bits)) & ((1 << bits) - 1)) as usize;
+            nbits -= bits;
+            match code {
+                256 => {
+                    table.truncate(258);
+                    bits = 9;
+                    prev = None;
+                    continue;
+                }
+                257 => return Some(out),
+                _ => {}
+            }
+            let entry = if code < table.len() {
+                table[code].clone()
+            } else if let Some(previous) = &prev {
+                let mut entry = previous.clone();
+                entry.push(previous[0]);
+                entry
+            } else {
+                return Some(out);
+            };
+            if out.len().checked_add(entry.len())? > max {
+                return None;
+            }
+            out.extend_from_slice(&entry);
+            if let Some(previous) = prev
+                && table.len() < 4096
+            {
+                let mut next = previous;
+                next.push(entry[0]);
+                table.push(next);
+            }
+            prev = Some(entry);
+            if table.len() + usize::from(early) >= (1 << bits) && bits < 12 {
+                bits += 1;
+            }
+        }
+    }
+    Some(out)
+}
+
+#[test]
+fn lzw_differential_fixtures_and_random_valid_streams() {
+    let mut seed = 0x1234_5678u32;
+    for early in [false, true] {
+        let fixtures = [lzw_codes([256, 65, 66, 258, 257], early), lzw_codes([256, 65].into_iter().chain(258..=512).chain([257]), early)];
+        for data in fixtures {
+            let old = old_lzw(&data, early, 1 << 20);
+            assert_eq!(object::lzw(&data, early, 1 << 20), old);
+        }
+        for length in [0, 1, 31, 253, 254, 255, 256, 1024, 4096] {
+            let plain: Vec<u8> = (0..length)
+                .map(|_| {
+                    seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    (seed >> 16) as u8
+                })
+                .collect();
+            let data = lzw_codes(std::iter::once(256).chain(plain.iter().map(|value| u16::from(*value))).chain([257]), early);
+            assert_eq!(object::lzw(&data, early, plain.len()), old_lzw(&data, early, plain.len()), "early={early} length={length}");
+            assert_eq!(object::lzw(&data, early, plain.len()), Some(plain));
+        }
+    }
+}
+
+#[test]
+fn inflate_differential_fixtures_and_random_valid_streams() {
+    let mut seed = 0x9876_5432u32;
+    for length in [0, 1, 2, 128, 1024, 8192, 65536] {
+        let plain: Vec<u8> = (0..length)
+            .map(|_| {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (seed >> 16) as u8
+            })
+            .collect();
+        for (stream, zlib) in [(miniz_oxide::deflate::compress_to_vec_zlib(&plain, 6), true), (miniz_oxide::deflate::compress_to_vec(&plain, 6), false)] {
+            let old = if zlib {
+                miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&stream, length).unwrap()
+            } else {
+                miniz_oxide::inflate::decompress_to_vec_with_limit(&stream, length).unwrap()
+            };
+            assert_eq!(object::inflate(&stream, length), Some(old));
+        }
+    }
+    let fixture = sample_pdf(true);
+    assert_eq!(parse(&fixture).unwrap().pixel_size(), (200, 100));
+}
+
 #[test]
 fn lzw_long_run_is_bounded_and_full_table_decodes() {
     // Grow strings of A until the 12-bit table is full, then send literal A codes.
