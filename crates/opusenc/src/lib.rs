@@ -32,18 +32,17 @@ mod range;
 mod rate;
 mod resample;
 mod silk;
-mod tables;
 
 use std::sync::OnceLock;
 
 use bands::{BandCoding, SPREAD_NORMAL, quant_all_bands};
+use craft_opus::celt_tables::{E_MEANS, EBANDS, MAX_LM as LM, NB_EBANDS, OVERLAP, PREEMPH, SPREAD_ICDF, TF_SELECT_TABLE, TRIM_ICDF};
 use energy::{quant_coarse_energy, quant_energy_finalise, quant_fine_energy};
 use mdct::Mdct;
 use range::{BITRES, RangeEncoder};
 use rate::{AllocationInput, Mode as CeltMode, compute_allocation};
 use resample::Downsampler;
 use silk::SilkEncoder;
-use tables::{E_MEANS, EBANDS, NB_EBANDS, OVERLAP, PREEMPH, SPREAD_ICDF, TF_SELECT_TABLE, TRIM_ICDF};
 
 /// Band range, channel count and transform size shared by CELT coding stages.
 #[derive(Clone, Copy)]
@@ -56,8 +55,6 @@ struct CeltFrame {
 
 /// Samples per channel in one 20 ms frame at 48 kHz.
 const N: usize = 960;
-/// LM of a 20 ms frame (8 short blocks).
-const LM: usize = 3;
 /// Smallest CELT payload the encoder produces (bytes).
 const MIN_FRAME_BYTES: usize = 16;
 /// Largest payload allowed in one frame (RFC 6716 §3.4, R2).

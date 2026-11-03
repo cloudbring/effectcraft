@@ -6,15 +6,10 @@
 
 use crate::CeltFrame;
 use crate::range::{BITRES, RangeEncoder, ilog};
-use crate::tables::{ALLOC, EBANDS, LOG2_FRAC_TABLE, MAX_LM, NB_EBANDS};
-
-const MAX_PSEUDO: i32 = 40;
-const LOG_MAX_PSEUDO: i32 = 6;
-pub const MAX_FINE_BITS: i32 = 8;
-const FINE_OFFSET: i32 = 21;
-pub const QTHETA_OFFSET: i32 = 4;
-pub const QTHETA_OFFSET_TWOPHASE: i32 = 16;
-const ALLOC_STEPS: i32 = 6;
+use craft_opus::celt_tables::{
+    ALLOC, ALLOC_STEPS, EBANDS, FINE_OFFSET, LOG_MAX_PSEUDO, LOG2_FRAC_TABLE, MAX_FINE_BITS, MAX_LM, MAX_PSEUDO, NB_EBANDS, QTHETA_OFFSET,
+    QTHETA_OFFSET_TWOPHASE,
+};
 
 /// Number of pulses represented by pseudo-pulse index `i`.
 pub fn get_pulses(i: i32) -> i32 {

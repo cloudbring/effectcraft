@@ -6,8 +6,8 @@
 
 use crate::CeltFrame;
 use crate::range::RangeEncoder;
-use crate::rate::{Allocation, MAX_FINE_BITS};
-use crate::tables::{BETA_COEF, BETA_INTRA, E_PROB_MODEL, NB_EBANDS, PRED_COEF, SMALL_ENERGY_ICDF};
+use crate::rate::Allocation;
+use craft_opus::celt_tables::{BETA_COEF, BETA_INTRA, E_PROB_MODEL, MAX_FINE_BITS, NB_EBANDS, PRED_COEF, SMALL_ENERGY_ICDF};
 
 const LAPLACE_MINP: u32 = 1;
 const LAPLACE_NMIN: u32 = 16;

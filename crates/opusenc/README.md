@@ -1,7 +1,7 @@
 # effectcraft-opusenc
 
 Clean-room, pure-Rust Opus encoder for EffectCraft's WebM export audio (layer L0, `craft-fft` transforms,
-no `unsafe`, builds for `wasm32-unknown-unknown`).
+`craft-opus` CELT constants, no `unsafe`, builds for `wasm32-unknown-unknown`).
 
 All three Opus modes, 20 ms packets (one frame per packet), 48 kHz float input, mono or stereo:
 
@@ -123,8 +123,9 @@ narrowband files encoded by libopus itself.
 
 ## Shared transforms and CELT table API (#49)
 
-`craft-fft` and the test decoder `craft-opus` use `cloudbring/craft-libs` branch
-`algo/integration`, locked at `249cbcc191bbf14558577677b239a45a7e724c72`. Repoint both
+`craft-fft` and `craft-opus` use `cloudbring/craft-libs` branch
+`algo/integration`, locked at `6df187f60461638dfc64a1ee9be31319eff6000c`. Both are normal
+dependencies; `craft-opus` also remains a test decoder. Repoint both
 dependencies to the upstream release/revision when that branch lands.
 
 The analysis adapter pads N+120 samples at offset (N−120)/2 in a 2N block, multiplies
@@ -135,26 +136,47 @@ N/2 inverse scaling and low-overlap TDAC rotation. All four CELT sizes are teste
 No craft-fft API addition is needed. CELT framing/windowing belongs in the codec;
 if shared later, put the adapter in craft-opus, not the codec-neutral craft-fft.
 
-**No CELT table is currently publicly importable.** `craft-opus::celt` and its
-submodules are `pub(crate)`. Existing definitions remain unchanged, not newly
-copied. A standalone Rust equality check verified every integer entry and every
-float's `to_bits()` in the following existing definitions against that revision:
+All 25 shared items now come directly from `craft_opus::celt_tables`:
 
-- Proposed public `craft_opus::celt_tables` re-exports: `NB_EBANDS`, `EBANDS`,
+- Mode, energy and allocation tables: `NB_EBANDS`, `EBANDS`,
   `OVERLAP`, `MAX_LM`, `PREEMPH`, `ALLOC`, `E_MEANS`, `PRED_COEF`, `BETA_COEF`,
   `BETA_INTRA`, `E_PROB_MODEL`, `SMALL_ENERGY_ICDF`, `LOG2_FRAC_TABLE`,
   `TF_SELECT_TABLE`, `SPREAD_ICDF`, `TRIM_ICDF` (16 definitions, 11 arrays).
-- Also move/re-export the byte-identical function-local `EXP2_TABLE8: [i32; 8]`
-  and `SPREAD_FACTOR: [usize; 3]` from `celt::bands` into that public table API.
-- Identical rate constants still private to the codec: `MAX_PSEUDO`,
+- Band-shape tables: `EXP2_TABLE8` and `SPREAD_FACTOR`, including the test rotation.
+- Rate constants: `MAX_PSEUDO`,
   `LOG_MAX_PSEUDO`, `MAX_FINE_BITS`, `FINE_OFFSET`, `QTHETA_OFFSET`,
-  `QTHETA_OFFSET_TWOPHASE`, `ALLOC_STEPS` (all `i32`); expose them there too.
+  `QTHETA_OFFSET_TWOPHASE`, `ALLOC_STEPS` (all `i32`). The fixed 20 ms frame's `LM`
+  imports `MAX_LM` under its existing name.
 
-After these API additions, replace the local definitions with imports and move
-craft-opus from dev-dependencies to dependencies. Generated PVQ/pulse caches and
-SILK codebooks are outside this constant-table migration.
+Before deleting the definitions, 26 temporary equality tests passed: one per export
+(integer arrays entry-for-entry, floats via `to_bits()`), plus the frame `LM` alias.
+The spreading test checked both production and test-local copies. These checks were
+then removed with the definitions rather than retained as import-to-itself assertions.
 
-Validation on 2026-11-03, rustup stable rustc 1.99.0, aarch64-apple-darwin:
+Remaining local data is intentionally outside this API: generated PVQ indexing,
+pulse-bit and allocation-cap caches (not exported), SILK probability tables/codebooks
+(not CELT and not exported), and encoder-only search limits, spreading choice, mode/
+bandwidth policy and generated resampling/MDCT-window gains. Range-coder and Laplace
+constants and packet/framing limits are also not exported; equal numeric values with
+unrelated meanings are not aliases. Test-only allocation-cap reference vectors remain
+independent expectations for the generated caches.
+
+Table-migration validation against **abe95d56**, 2026-11-03, rustup stable rustc 1.99.0,
+aarch64-apple-darwin: all **7,243 packets (655,108 payload bytes)** are byte-identical.
+Temporary capture covered both shared encode helpers and the direct shared-decoder
+test: 6,404 packets from the 13 opusenc integration tests and 839 from the 10 export
+Opus round-trips; three tests produce no packets. The comparison checks every byte
+and packet boundary, not decoded tolerances. Combined SHA-256 of sorted test names
+plus NUL and u64-LE-length-prefixed packets:
+`f3596947fc8e12e45ea2416a99ba0a5ba795cbf96f2af8a39442cdbfab2ff81e`.
+Capture instrumentation was removed before final gates. Package tests: 151 passed,
+0 failed, 1 pre-existing ignored VP9 benchmark. Package clippy (`--all-targets --
+-D warnings`), workspace fmt and `cargo xtask layers` pass.
+
+### Earlier MDCT migration (abe95d56)
+
+The earlier transform migration, before the table-only change above, was validated
+on 2026-11-03 with rustup stable rustc 1.99.0, aarch64-apple-darwin:
 the existing suites retained their SNR/spectral tolerances. Of 7,179 packets captured
 from their shared encode helpers, 505 changed; maximum decoded PCM difference from
 the old encoder through the same FilmCraft decoder was 0.034308255 (stereo 128 kb/s).

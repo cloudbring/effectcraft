@@ -1098,7 +1098,7 @@ dependencies = [
 [[package]]
 name = "craft-bitstream"
 version = "0.1.0"
-source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#249cbcc191bbf14558577677b239a45a7e724c72"
+source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#6df187f60461638dfc64a1ee9be31319eff6000c"
 dependencies = [
  "craft-media",
 ]
@@ -1121,7 +1121,7 @@ dependencies = [
 [[package]]
 name = "craft-fft"
 version = "0.1.0"
-source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#249cbcc191bbf14558577677b239a45a7e724c72"
+source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#6df187f60461638dfc64a1ee9be31319eff6000c"
 dependencies = [
  "realfft",
  "rustfft",
@@ -1158,7 +1158,7 @@ dependencies = [
 [[package]]
 name = "craft-media"
 version = "0.1.0"
-source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#249cbcc191bbf14558577677b239a45a7e724c72"
+source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#6df187f60461638dfc64a1ee9be31319eff6000c"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -1166,7 +1166,7 @@ dependencies = [
 [[package]]
 name = "craft-opus"
 version = "0.1.0"
-source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#249cbcc191bbf14558577677b239a45a7e724c72"
+source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#6df187f60461638dfc64a1ee9be31319eff6000c"
 dependencies = [
  "craft-bitstream",
  "craft-fft",

@@ -7,9 +7,9 @@
 //! split/pulse decisions.
 
 use crate::range::{BITRES, RangeEncoder, ilog};
-use crate::rate::{Mode, QTHETA_OFFSET, get_pulses};
-use crate::tables::EBANDS;
+use crate::rate::{Mode, get_pulses};
 use crate::{CeltFrame, rate::Allocation};
+use craft_opus::celt_tables::{EBANDS, EXP2_TABLE8, QTHETA_OFFSET, SPREAD_FACTOR};
 
 pub const SPREAD_NORMAL: usize = 2;
 
@@ -34,7 +34,6 @@ fn bitexact_log2tan(isin: i32, icos: i32) -> i32 {
 }
 
 fn compute_qn(n: i32, b: i32, offset: i32, pulse_cap: i32, stereo: bool) -> i32 {
-    const EXP2_TABLE8: [i32; 8] = [16384, 17866, 19483, 21247, 23170, 25267, 27554, 30048];
     let mut n2 = 2 * n - 1;
     if stereo && n == 2 {
         n2 -= 1;
@@ -74,7 +73,6 @@ fn exp_rotation1_inv(x: &mut [f32], len: usize, stride: usize, c: f32, s: f32) {
 
 /// Inverse of the decoder's spreading rotation (§4.3.4.3) for one block of `len` samples.
 pub fn exp_rotation_inv(x: &mut [f32], len: usize, k: usize, spread: usize) {
-    const SPREAD_FACTOR: [usize; 3] = [15, 10, 5];
     if 2 * k >= len || spread == 0 {
         return;
     }
@@ -439,7 +437,6 @@ mod tests {
 
     /// The decoder's spreading rotation (single block).
     fn exp_rotation(x: &mut [f32], len: usize, k: usize, spread: usize) {
-        const SPREAD_FACTOR: [usize; 3] = [15, 10, 5];
         if 2 * k >= len || spread == 0 {
             return;
         }

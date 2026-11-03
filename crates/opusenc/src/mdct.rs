@@ -6,7 +6,7 @@
 
 use craft_fft::{Error, TdacWindow};
 
-use crate::tables::OVERLAP;
+use craft_opus::celt_tables::OVERLAP;
 
 pub struct Mdct {
     transform: craft_fft::Mdct<f32>,
