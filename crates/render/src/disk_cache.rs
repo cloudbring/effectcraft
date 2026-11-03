@@ -250,38 +250,22 @@ pub struct DiskCache {
 }
 
 /// FNV-1a 128-bit (content keys).
-#[derive(Clone, Copy)]
-pub struct Hash128(u128);
-
-impl Default for Hash128 {
-    fn default() -> Self {
-        Hash128(0x6c62_272e_07bb_0142_62b8_2175_6295_c58d)
-    }
-}
+#[derive(Clone, Copy, Default)]
+pub struct Hash128(craft_hash::ContentHash);
 
 impl Hash128 {
     pub fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.0 ^= b as u128;
-            self.0 = self.0.wrapping_mul(0x0000_0000_0100_0000_0000_0000_0000_013b);
-        }
+        self.0.update(bytes);
     }
     pub fn write_u64(&mut self, v: u64) {
         self.write(&v.to_le_bytes());
     }
     pub fn finish(&self) -> u128 {
-        self.0
+        self.0.finish()
     }
 }
 
-fn checksum(data: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for &b in data {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    h
-}
+use craft_hash::fnv1a64 as checksum;
 
 /// The platform's default disk cache folder.
 pub fn default_folder() -> PathBuf {
@@ -1290,5 +1274,39 @@ mod tests {
         assert_ne!(a, b, "replaced virtual media must not reuse the salt");
         assert_ne!(ka, kb, "replaced virtual media must not reuse the frame key");
         assert_eq!(comp_content_key(&p, cid), comp_content_key_with(&p, cid, None));
+    }
+}
+
+#[cfg(test)]
+mod hash_compatibility_tests {
+    #[test]
+    fn legacy_fnv_matches_shared_hash() {
+        for bytes in [b"".as_slice(), b"123456789", &[0, 255, 128]] {
+            let mut expected = 0xcbf2_9ce4_8422_2325u64;
+            for &byte in bytes {
+                expected ^= u64::from(byte);
+                expected = expected.wrapping_mul(0x0100_0000_01b3);
+            }
+            assert_eq!(super::checksum(bytes), expected);
+        }
+    }
+
+    #[test]
+    fn legacy_content_hash_matches_shared_hash() {
+        for bytes in [b"".as_slice(), b"123456789", &[0, 255, 128]] {
+            let mut expected = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58du128;
+            for &byte in bytes {
+                expected ^= u128::from(byte);
+                expected = expected.wrapping_mul(0x0000_0000_0100_0000_0000_0000_0000_013b);
+            }
+            let mut actual = super::Hash128::default();
+            actual.write(bytes);
+            assert_eq!(actual.finish(), expected);
+            let mut streamed = super::Hash128::default();
+            for chunk in bytes.chunks(2) {
+                streamed.write(chunk);
+            }
+            assert_eq!(streamed.finish(), expected);
+        }
     }
 }

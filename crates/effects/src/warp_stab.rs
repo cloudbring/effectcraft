@@ -152,21 +152,18 @@ pub fn settings(params: &Params, fps: f64) -> StabSettings {
     }
 }
 
-struct KeyHasher(u64);
+struct KeyHasher(craft_hash::Fnv64);
 impl Hasher for KeyHasher {
     fn finish(&self) -> u64 {
-        self.0
+        self.0.finish()
     }
     fn write(&mut self, bytes: &[u8]) {
-        for b in bytes {
-            self.0 ^= *b as u64;
-            self.0 = self.0.wrapping_mul(0x0100_0000_01b3);
-        }
+        self.0.update(bytes);
     }
 }
 
 fn settings_key(s: &StabSettings) -> u64 {
-    let mut h = KeyHasher(0x9e37_79b9_7f4a_7c15);
+    let mut h = KeyHasher(craft_hash::Fnv64::from_state(0x9e37_79b9_7f4a_7c15));
     for v in [s.smoothness, s.max_scale, s.action_safe, s.additional_scale, s.crop_less_smooth_more, s.fps] {
         h.write_u64(v.to_bits());
     }
@@ -659,5 +656,31 @@ mod tests {
         p.values.insert("#1/smoothness".into(), num(12.0));
         assert_eq!(f(&p, "borders/autoScale/maximumScale"), 120.0);
         assert_eq!(f(&p, "stabilization/smoothness"), 12.0);
+    }
+}
+
+#[cfg(test)]
+mod hash_compatibility_tests {
+    use std::hash::Hasher;
+
+    #[test]
+    fn legacy_key_hasher_matches_shared_hash() {
+        for seed in [0, 0xcbf2_9ce4_8422_2325, 0x9e37_79b9_7f4a_7c15, 0xcbf2_9ce4_8422_2325 ^ 0x5bd1_e995_7a3c_11d3] {
+            for bytes in [b"".as_slice(), b"123456789", &[0, 255, 128]] {
+                let mut expected = seed;
+                for &byte in bytes {
+                    expected ^= u64::from(byte);
+                    expected = expected.wrapping_mul(0x0100_0000_01b3);
+                }
+                let mut actual = super::KeyHasher(craft_hash::Fnv64::from_state(seed));
+                actual.write(bytes);
+                assert_eq!(actual.finish(), expected);
+                let mut streamed = super::KeyHasher(craft_hash::Fnv64::from_state(seed));
+                for chunk in bytes.chunks(2) {
+                    streamed.write(chunk);
+                }
+                assert_eq!(streamed.finish(), expected);
+            }
+        }
     }
 }

@@ -14,14 +14,7 @@ pub(crate) struct AnalysisCache<T> {
     entries: OnceLock<Mutex<Vec<Entry<T>>>>,
 }
 
-pub(crate) fn fnv(bytes: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in bytes {
-        h ^= *b as u64;
-        h = h.wrapping_mul(0x0100_0000_01b3);
-    }
-    h
-}
+pub(crate) use craft_hash::fnv1a64 as fnv;
 
 impl<T> AnalysisCache<T> {
     pub(crate) const fn new() -> Self {
@@ -92,6 +85,21 @@ mod tests {
         for i in 0..30 {
             cache.get(&i.to_string(), |s| Some(s.to_owned())).unwrap();
             assert!(cache.entries.get().unwrap().lock().unwrap().len() <= 9);
+        }
+    }
+}
+
+#[cfg(test)]
+mod hash_compatibility_tests {
+    #[test]
+    fn legacy_fnv_matches_shared_hash() {
+        for bytes in [b"".as_slice(), b"123456789", &[0, 255, 128]] {
+            let mut expected = 0xcbf2_9ce4_8422_2325u64;
+            for &byte in bytes {
+                expected ^= u64::from(byte);
+                expected = expected.wrapping_mul(0x0100_0000_01b3);
+            }
+            assert_eq!(super::fnv(bytes), expected);
         }
     }
 }

@@ -207,14 +207,7 @@ fn set_str(g: &mut PropGroup, m: &str, v: String) {
     }
 }
 
-fn fnv(s: &str) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in s.as_bytes() {
-        h ^= *b as u64;
-        h = h.wrapping_mul(0x0100_0000_01b3);
-    }
-    h
-}
+use craft_hash::fnv1a64 as fnv;
 
 /// What the effect's input frames are made of: the layer's source and timing, its masks and the
 /// effects above the Roto Brush.
@@ -231,7 +224,7 @@ pub fn input_key(p: &Project, comp: ItemId, layer: &Layer, uid: Uid) -> String {
             s.push_str(&format!("{g:?}"));
         }
     }
-    format!("{:016x}", fnv(&s))
+    format!("{:016x}", fnv(s.as_bytes()))
 }
 
 /// After an edit: refresh Input Keys (Roto Brush and Object Matte); frozen mattes made from
@@ -904,5 +897,20 @@ impl Session {
             out.insert(*f, ch.is_cached(*f, 1.0));
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod hash_compatibility_tests {
+    #[test]
+    fn legacy_fnv_matches_shared_hash() {
+        for bytes in [b"".as_slice(), b"123456789", &[0, 255, 128]] {
+            let mut expected = 0xcbf2_9ce4_8422_2325u64;
+            for &byte in bytes {
+                expected ^= u64::from(byte);
+                expected = expected.wrapping_mul(0x0100_0000_01b3);
+            }
+            assert_eq!(super::fnv(bytes), expected);
+        }
     }
 }

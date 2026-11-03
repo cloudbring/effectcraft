@@ -1,16 +1,7 @@
 //! A minimal ZIP writer (stored entries, PKWARE APPNOTE 6.3 local headers + central directory)
 //! for `.lottie` (dotLottie) archives.
 
-fn crc32(data: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFFu32;
-    for &b in data {
-        crc ^= b as u32;
-        for _ in 0..8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
-        }
-    }
-    !crc
-}
+use craft_hash::crc32;
 
 /// Build a ZIP archive with the given (name, bytes) entries, uncompressed.
 pub fn store(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
@@ -117,5 +108,22 @@ mod tests {
         let z = super::store(&names.iter().map(|n| (n.to_string(), b"x".to_vec())).collect::<Vec<_>>());
         let back: Vec<String> = super::read_stored(&z).into_iter().map(|(n, _)| n).collect();
         assert_eq!(back, ["ok/x.txt", "ok/..x"]);
+    }
+}
+
+#[cfg(test)]
+mod hash_compatibility_tests {
+    #[test]
+    fn legacy_crc32_matches_shared_hash() {
+        for bytes in [b"".as_slice(), b"123456789", &[0, 255, 128]] {
+            let mut expected = 0xffff_ffffu32;
+            for &byte in bytes {
+                expected ^= u32::from(byte);
+                for _ in 0..8 {
+                    expected = if expected & 1 != 0 { (expected >> 1) ^ 0xedb8_8320 } else { expected >> 1 };
+                }
+            }
+            assert_eq!(super::crc32(bytes), !expected);
+        }
     }
 }

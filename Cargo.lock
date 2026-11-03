@@ -1110,6 +1110,14 @@ version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13afff77f38b5c11b73aa0#92d392cff132eaf53e13afff77f38b5c11b73aa0"
 
 [[package]]
+name = "craft-hash"
+version = "0.1.0"
+source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#6ece93cd93d5461ed96a50f608f1daf2d48c4618"
+dependencies = [
+ "sha2",
+]
+
+[[package]]
 name = "craft-i18n"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13afff77f38b5c11b73aa0#92d392cff132eaf53e13afff77f38b5c11b73aa0"
@@ -1488,6 +1496,7 @@ name = "effectcraft-effects"
 version = "0.21.0"
 dependencies = [
  "chrono",
+ "craft-hash",
  "effectcraft-color",
  "effectcraft-geom",
  "effectcraft-keyframe",
@@ -1507,6 +1516,7 @@ version = "0.21.0"
 dependencies = [
  "chrono",
  "craft-docpath",
+ "craft-hash",
  "effectcraft-color",
  "effectcraft-effects",
  "effectcraft-geom",
@@ -1684,6 +1694,7 @@ name = "effectcraft-lottie"
 version = "0.21.0"
 dependencies = [
  "craft-docpath",
+ "craft-hash",
  "effectcraft-color",
  "effectcraft-effects",
  "effectcraft-keyframe",
@@ -1823,6 +1834,7 @@ dependencies = [
 name = "effectcraft-render"
 version = "0.21.0"
 dependencies = [
+ "craft-hash",
  "effectcraft-color",
  "effectcraft-effects",
  "effectcraft-geom",
@@ -1878,6 +1890,7 @@ dependencies = [
 name = "effectcraft-segment"
 version = "0.21.0"
 dependencies = [
+ "craft-hash",
  "miniz_oxide 0.9.1",
  "ndarray",
  "rayon",
@@ -1919,6 +1932,7 @@ dependencies = [
 name = "effectcraft-track"
 version = "0.21.0"
 dependencies = [
+ "craft-hash",
  "effectcraft-raster",
  "effectcraft-segment",
  "rayon",
@@ -1932,6 +1946,7 @@ name = "effectcraft-ui-egui"
 version = "0.21.0"
 dependencies = [
  "chrono",
+ "craft-hash",
  "craft-quit",
  "craft-ui",
  "craft-update",

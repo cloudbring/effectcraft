@@ -124,11 +124,10 @@ fn s<'a>(params: &'a Params, id: &str) -> &'a str {
     }
 }
 
-fn fnv(h: &mut u64, bytes: &[u8]) {
-    for b in bytes {
-        *h ^= *b as u64;
-        *h = h.wrapping_mul(0x0100_0000_01b3);
-    }
+fn fnv(state: &mut u64, bytes: &[u8]) {
+    let mut hash = craft_hash::Fnv64::from_state(*state);
+    hash.update(bytes);
+    *state = hash.finish();
 }
 
 /// The instance's strokes (parsed once per content).
@@ -2084,5 +2083,29 @@ mod tests {
         assert_eq!(g.sub("rotoBrushPropagation").unwrap().name, "Roto Brush Propagation");
         // Parameters the old save lacked get their defaults.
         assert_eq!(f(&params, "rotoBrushPropagation/motionDamping"), 20.0);
+    }
+}
+
+#[cfg(test)]
+mod hash_compatibility_tests {
+    #[test]
+    fn legacy_seeded_fnv_matches_shared_hash() {
+        for seed in [0, 0xcbf2_9ce4_8422_2325, 0x9e37_79b9_7f4a_7c15, 0xcbf2_9ce4_8422_2325 ^ 0x9e37_79b9_7f4a_7c15] {
+            for bytes in [b"".as_slice(), b"123456789", &[0, 255, 128]] {
+                let mut expected = seed;
+                for &byte in bytes {
+                    expected ^= u64::from(byte);
+                    expected = expected.wrapping_mul(0x0100_0000_01b3);
+                }
+                let mut actual = seed;
+                super::fnv(&mut actual, bytes);
+                assert_eq!(actual, expected);
+                let mut streamed = seed;
+                for chunk in bytes.chunks(2) {
+                    super::fnv(&mut streamed, chunk);
+                }
+                assert_eq!(streamed, expected);
+            }
+        }
     }
 }

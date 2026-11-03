@@ -44,7 +44,7 @@ fn thumbnail(app: &EffectcraftApp, ctx: &egui::Context, path: &str, budget: &mut
             return None;
         }
         // A synthetic item id keyed by the path (the frame cache keys on the path).
-        let hid = path.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3)) | (1 << 62);
+        let hid = craft_hash::fnv1a64(path.as_bytes()) | (1 << 62);
         let img = app.session.footage.frame(ItemId(hid), &f, effectcraft_engine::time::Tick::ZERO)?;
         let step = (img.width.max(img.height) as f32 / 128.0).ceil().max(1.0) as u32;
         let (w, h) = (img.width.div_ceil(step), img.height.div_ceil(step));
@@ -478,5 +478,16 @@ mod tests {
         before.sort();
         after.sort();
         println!("1,000 Media Browser entries, median per warm cache lookup: {:?} -> {:?}", before[2] / 1000, after[2] / 1000);
+    }
+}
+
+#[cfg(test)]
+mod hash_compatibility_tests {
+    #[test]
+    fn legacy_thumbnail_key_matches_shared_hash() {
+        for bytes in [b"".as_slice(), b"123456789", &[0, 255, 128]] {
+            let expected = bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, &byte| (hash ^ u64::from(byte)).wrapping_mul(0x100_0000_01b3)) | (1 << 62);
+            assert_eq!(craft_hash::fnv1a64(bytes) | (1 << 62), expected);
+        }
     }
 }

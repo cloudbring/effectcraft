@@ -10,6 +10,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+craft-hash = { workspace = true }
 miniz_oxide = "0.9"
 ndarray = { version = "0.17", default-features = false, features = ["std"] }
 rayon = { workspace = true }

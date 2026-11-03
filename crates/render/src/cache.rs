@@ -407,17 +407,14 @@ impl LayerStore for PrefetchStore {
 }
 
 /// FNV-1a style 64-bit hasher fed by `Debug` output (exact float formatting) and raw values.
-struct KeyHasher(u64);
+struct KeyHasher(craft_hash::Fnv64);
 
 impl Hasher for KeyHasher {
     fn finish(&self) -> u64 {
-        self.0
+        self.0.finish()
     }
     fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.0 ^= b as u64;
-            self.0 = self.0.wrapping_mul(0x0100_0000_01b3);
-        }
+        self.0.update(bytes);
     }
 }
 
@@ -528,7 +525,7 @@ pub fn input_key(ctx: &EvalCtx, layer: &Layer, scale: f64, draft: bool, blur: bo
         return None;
     }
     let base = key_any(ctx, layer, scale, draft, blur, true, EffectScope::First(effects))?;
-    let mut h = KeyHasher(base ^ 0x5bd1_e995_7a3c_11d3);
+    let mut h = KeyHasher(craft_hash::Fnv64::from_state(base ^ 0x5bd1_e995_7a3c_11d3));
     effects.hash(&mut h);
     Some(h.finish())
 }
@@ -621,7 +618,7 @@ fn key_with(ctx: &EvalCtx, layer: &Layer, scale: f64, draft: bool, blur: bool, f
 /// `blur`: the layer is motion blurred in this render (`Renderer::mb_on`). `effects`: how far
 /// the effect stack reaches into the key (see [`EffectScope`]).
 fn key_any(ctx: &EvalCtx, layer: &Layer, scale: f64, draft: bool, blur: bool, footage: bool, effects: EffectScope) -> Option<u64> {
-    let mut h = KeyHasher(0xcbf2_9ce4_8422_2325);
+    let mut h = KeyHasher(craft_hash::Fnv64::from_state(0xcbf2_9ce4_8422_2325));
     ctx.comp.frame_rate.as_f64().to_bits().hash(&mut h);
     ctx.comp.enable_frame_blending.hash(&mut h);
     dependencies::hash(&mut h, ctx, layer, effects)?;
@@ -757,7 +754,7 @@ fn reads_comp_scene(layer: &Layer) -> bool {
 /// switches, values, keyframes, expressions and their values at the context time — Global Light
 /// included, as every layer mirrors it in its Blending Options).
 pub fn styles_key(ctx: &EvalCtx, layer: &Layer, content_key: u64) -> u64 {
-    let mut h = KeyHasher(content_key ^ 0x9e37_79b9_7f4a_7c15);
+    let mut h = KeyHasher(craft_hash::Fnv64::from_state(content_key ^ 0x9e37_79b9_7f4a_7c15));
     if let Some(g) = layer.layer_styles() {
         hash_debug(&mut h, g);
         hash_values(&mut h, ctx, layer, g);
@@ -767,7 +764,7 @@ pub fn styles_key(ctx: &EvalCtx, layer: &Layer, content_key: u64) -> u64 {
 
 /// A sub-key of `key` (styled layer passes, flattened buffer).
 pub fn derive(key: u64, i: u64) -> u64 {
-    let mut h = KeyHasher(key);
+    let mut h = KeyHasher(craft_hash::Fnv64::from_state(key));
     i.hash(&mut h);
     h.finish()
 }
@@ -789,5 +786,31 @@ mod shared_insert_tests {
         assert!(Arc::ptr_eq(&cache.insert(3, a.clone()), &a));
         assert!(Arc::ptr_eq(&cache.insert(3, b), &a), "the later render gets the first buffer");
         assert!(Arc::ptr_eq(&cache.get(3).unwrap(), &a));
+    }
+}
+
+#[cfg(test)]
+mod hash_compatibility_tests {
+    use std::hash::Hasher;
+
+    #[test]
+    fn legacy_key_hasher_matches_shared_hash() {
+        for seed in [0, 0xcbf2_9ce4_8422_2325, 0x9e37_79b9_7f4a_7c15, 0xcbf2_9ce4_8422_2325 ^ 0x5bd1_e995_7a3c_11d3] {
+            for bytes in [b"".as_slice(), b"123456789", &[0, 255, 128]] {
+                let mut expected = seed;
+                for &byte in bytes {
+                    expected ^= u64::from(byte);
+                    expected = expected.wrapping_mul(0x0100_0000_01b3);
+                }
+                let mut actual = super::KeyHasher(craft_hash::Fnv64::from_state(seed));
+                actual.write(bytes);
+                assert_eq!(actual.finish(), expected);
+                let mut streamed = super::KeyHasher(craft_hash::Fnv64::from_state(seed));
+                for chunk in bytes.chunks(2) {
+                    streamed.write(chunk);
+                }
+                assert_eq!(streamed.finish(), expected);
+            }
+        }
     }
 }
