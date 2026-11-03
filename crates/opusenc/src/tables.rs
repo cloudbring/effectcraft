@@ -1,7 +1,8 @@
 //! Constant tables of the 48 kHz CELT mode (RFC 6716 §4.3, Tables 55–58 and §4.3.2).
 //!
-//! Transcribed from RFC 6716; copied from FilmCraft's spec-derived `filmcraft-opus` decoder
-//! (first-party, MIT OR Apache-2.0) so both sides share the exact same values.
+//! Existing first-party, spec-derived values, byte-identical to `craft-opus` at 249cbcc1.
+//! Its CELT modules are private: retain these until the public `celt_tables` API described
+//! in the crate README is available; do not introduce another copy.
 
 /// Number of energy bands.
 pub const NB_EBANDS: usize = 21;

@@ -1,363 +1,219 @@
-//! Forward MDCT with the CELT low-overlap window (RFC 6716 §4.3.7, run in the analysis
-//! direction).
+//! CELT low-overlap analysis adapter (RFC 6716 §4.3.7).
 //!
-//! A 20 ms frame is a 1920-point MDCT (960 coefficients) whose window is zero for 420 samples,
-//! rises over the 120-sample overlap, is flat for 840 samples, falls over the next 120 samples
-//! and is zero again for the last 420. The input block is therefore the 120 overlap samples kept
-//! from the previous frame followed by the 960 new samples. The MDCT is folded into a DCT-IV,
-//! which is computed with an N/2-point complex FFT.
+//! Pad the N+120 sample block to 2N, compensate craft-fft's sine window with the
+//! CELT window, then scale its unnormalised coefficients by 2/N. The FFT plan,
+//! compensation gains and scratch are allocated only at construction.
+
+use craft_fft::{Error, TdacWindow};
 
 use crate::tables::OVERLAP;
 
-#[derive(Clone, Copy, Default, Debug)]
-pub struct Cpx {
-    pub re: f32,
-    pub im: f32,
-}
-
-impl Cpx {
-    #[inline]
-    fn mul(self, o: Cpx) -> Cpx {
-        Cpx { re: self.re * o.re - self.im * o.im, im: self.re * o.im + self.im * o.re }
-    }
-    #[inline]
-    fn add(self, o: Cpx) -> Cpx {
-        Cpx { re: self.re + o.re, im: self.im + o.im }
-    }
-    #[inline]
-    fn sub(self, o: Cpx) -> Cpx {
-        Cpx { re: self.re - o.re, im: self.im - o.im }
-    }
-}
-
-/// Mixed-radix (2, 3, 4, 5) forward complex FFT, unscaled (decimation in time, recursive).
-pub struct Fft {
-    n: usize,
-    factors: Vec<usize>,
-    twiddle: Vec<Cpx>,
-}
-
-impl Fft {
-    pub fn new(n: usize) -> Fft {
-        let mut factors = Vec::new();
-        let mut m = n;
-        for p in [4usize, 2, 3, 5] {
-            while m.is_multiple_of(p) {
-                factors.push(p);
-                m /= p;
-            }
-        }
-        assert_eq!(m, 1, "unsupported FFT size {n}");
-        let twiddle = (0..n)
-            .map(|k| {
-                let ph = -2.0 * std::f64::consts::PI * k as f64 / n as f64;
-                Cpx { re: ph.cos() as f32, im: ph.sin() as f32 }
-            })
-            .collect();
-        Fft { n, factors, twiddle }
-    }
-
-    pub fn process(&self, data: &mut [Cpx], scratch: &mut Vec<Cpx>) {
-        scratch.clear();
-        scratch.extend_from_slice(&data[..self.n]);
-        self.rec(&mut data[..self.n], scratch, 1, self.n, 0, 1);
-    }
-
-    fn rec(&self, out: &mut [Cpx], inp: &[Cpx], in_stride: usize, n: usize, fi: usize, tw_stride: usize) {
-        let p = self.factors[fi];
-        let m = n / p;
-        if m == 1 {
-            for (i, o) in out.iter_mut().enumerate().take(p) {
-                *o = inp[i * in_stride];
-            }
-        } else {
-            for q in 0..p {
-                self.rec(&mut out[q * m..(q + 1) * m], &inp[q * in_stride..], in_stride * p, m, fi + 1, tw_stride * p);
-            }
-        }
-        // The twiddle index q * k * tw_stride is always below n, so no modulo is needed.
-        let tw = &self.twiddle;
-        match p {
-            2 => {
-                for k in 0..m {
-                    let a0 = out[k];
-                    let a1 = out[m + k].mul(tw[k * tw_stride]);
-                    out[k] = a0.add(a1);
-                    out[m + k] = a0.sub(a1);
-                }
-            }
-            4 => {
-                for k in 0..m {
-                    let t0 = out[k];
-                    let t1 = out[m + k].mul(tw[k * tw_stride]);
-                    let t2 = out[2 * m + k].mul(tw[2 * k * tw_stride]);
-                    let t3 = out[3 * m + k].mul(tw[3 * k * tw_stride]);
-                    let (s0, d0) = (t0.add(t2), t0.sub(t2));
-                    let (s1, d1) = (t1.add(t3), t1.sub(t3));
-                    out[k] = s0.add(s1);
-                    out[2 * m + k] = s0.sub(s1);
-                    // The odd outputs combine d0 with -j * d1 = (d1.im, -d1.re) and its negative.
-                    out[m + k] = Cpx { re: d0.re + d1.im, im: d0.im - d1.re };
-                    out[3 * m + k] = Cpx { re: d0.re - d1.im, im: d0.im + d1.re };
-                }
-            }
-            3 => {
-                // Imaginary part of exp(-2 pi i / 3) = -sqrt(3) / 2.
-                let h = tw[self.n / 3].im;
-                for k in 0..m {
-                    let t0 = out[k];
-                    let t1 = out[m + k].mul(tw[k * tw_stride]);
-                    let t2 = out[2 * m + k].mul(tw[2 * k * tw_stride]);
-                    let (s, d) = (t1.add(t2), t1.sub(t2));
-                    let a = Cpx { re: t0.re - 0.5 * s.re, im: t0.im - 0.5 * s.im };
-                    out[k] = t0.add(s);
-                    // j * h * d = (-h * d.im, h * d.re)
-                    out[m + k] = Cpx { re: a.re - h * d.im, im: a.im + h * d.re };
-                    out[2 * m + k] = Cpx { re: a.re + h * d.im, im: a.im - h * d.re };
-                }
-            }
-            _ => {
-                // Generic DFT butterfly (radix 5, once per transform).
-                let roots: [Cpx; 5] = std::array::from_fn(|q| if q < p { tw[q * (self.n / p)] } else { Cpx::default() });
-                let mut t = [Cpx::default(); 5];
-                for k in 0..m {
-                    t[0] = out[k];
-                    for q in 1..p {
-                        t[q] = out[q * m + k].mul(tw[q * k * tw_stride]);
-                    }
-                    for q2 in 0..p {
-                        let mut acc = t[0];
-                        for q in 1..p {
-                            acc = acc.add(t[q].mul(roots[(q * q2) % p]));
-                        }
-                        out[q2 * m + k] = acc;
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Forward MDCT producing `n` coefficients from a block of `n + OVERLAP` samples.
 pub struct Mdct {
-    /// Number of coefficients (half the MDCT length).
-    n: usize,
-    fft: Fft,
-    pre: Vec<Cpx>,
-    post: Vec<Cpx>,
-    /// Rising half of the low-overlap window (RFC 6716 §4.3.7).
-    pub window: [f32; OVERLAP],
-    scale: f32,
-    z: Vec<Cpx>,
-    scratch: Vec<Cpx>,
-    v: Vec<f32>,
+    transform: craft_fft::Mdct<f32>,
+    input: Vec<f32>,
+    gains: Vec<f32>,
+    #[cfg(test)]
+    window: [f32; OVERLAP],
 }
 
 impl Mdct {
-    pub fn new(n: usize) -> Mdct {
-        let n2 = n / 2;
-        let pi = std::f64::consts::PI;
-        let pre = (0..n2)
-            .map(|m| {
-                let ph = -pi * m as f64 / n as f64;
-                Cpx { re: ph.cos() as f32, im: ph.sin() as f32 }
-            })
-            .collect();
-        let post = (0..n2)
-            .map(|p| {
-                let ph = -pi * (p as f64 + 0.25) / n as f64;
-                Cpx { re: ph.cos() as f32, im: ph.sin() as f32 }
-            })
-            .collect();
-        let mut window = [0f32; OVERLAP];
-        for (i, w) in window.iter_mut().enumerate() {
-            let x = std::f64::consts::FRAC_PI_2 * (i as f64 + 0.5) / OVERLAP as f64;
-            let s = x.sin();
-            *w = (std::f64::consts::FRAC_PI_2 * s * s).sin() as f32;
+    pub fn new(coefficients: usize) -> Result<Self, Error> {
+        if !matches!(coefficients, 120 | 240 | 480 | 960) {
+            return Err(Error::InvalidSize);
         }
-        Mdct { n, fft: Fft::new(n2), pre, post, window, scale: 2.0 / n as f32, z: Vec::new(), scratch: Vec::new(), v: vec![0.0; n] }
+        let transform = craft_fft::Mdct::new(coefficients, TdacWindow::Sine)?;
+        let window: [f32; OVERLAP] = std::array::from_fn(|index| {
+            let phase = std::f64::consts::FRAC_PI_2 * (index as f64 + 0.5) / OVERLAP as f64;
+            let sine = phase.sin();
+            (std::f64::consts::FRAC_PI_2 * sine * sine).sin() as f32
+        });
+        let pad = (coefficients - OVERLAP) / 2;
+        let gains = transform
+            .window()
+            .iter()
+            .skip(pad)
+            .take(coefficients + OVERLAP)
+            .enumerate()
+            .map(|(index, sine)| {
+                let celt = if index < OVERLAP {
+                    window[index]
+                } else if index >= coefficients {
+                    window[OVERLAP - 1 - (index - coefficients)]
+                } else {
+                    1.0
+                };
+                celt / sine
+            })
+            .collect();
+        Ok(Self {
+            transform,
+            input: vec![0.0; 2 * coefficients],
+            gains,
+            #[cfg(test)]
+            window,
+        })
     }
 
-    /// Transforms `block` (`n + OVERLAP` samples: the previous frame's last `OVERLAP` samples, then
-    /// `n` new ones) into `out[..n]`, scaled so that the RFC 6716 decoder's inverse MDCT and
-    /// overlap-add reproduce the input.
-    pub fn forward(&mut self, block: &[f32], out: &mut [f32]) {
-        let n = self.n;
-        let n2 = n / 2;
-        debug_assert_eq!(block.len(), n + OVERLAP);
-        // Place the windowed block into the (virtual) 2n-sample MDCT input u at offset `pad`.
-        let pad = (n - OVERLAP) / 2;
-        let w = &self.window;
-        let u = |t: usize| -> f32 {
-            if t < pad || t >= pad + n + OVERLAP {
-                return 0.0;
-            }
-            let j = t - pad;
-            let g = if j < OVERLAP {
-                w[j]
-            } else if j >= n {
-                w[OVERLAP - 1 - (j - n)]
-            } else {
-                1.0
-            };
-            block[j] * g
-        };
-        // Fold to a DCT-IV input: v = (-c_r - d, a - b_r) over the four quarters of u.
-        for m in 0..n2 {
-            self.v[m] = -u(n + n2 - 1 - m) - u(n + n2 + m);
-            self.v[n2 + m] = u(m) - u(n2 + n2 - 1 - m);
+    /// Preserves the block; invalid lengths leave the output untouched.
+    pub fn forward(&mut self, block: &[f32], output: &mut [f32]) -> Result<(), Error> {
+        let coefficients = self.transform.coefficients_len();
+        if block.len() != coefficients + OVERLAP {
+            return Err(Error::Length { expected: coefficients + OVERLAP, actual: block.len() });
         }
-        // DCT-IV via an n/2-point complex FFT.
-        self.z.clear();
-        for m in 0..n2 {
-            let wv = Cpx { re: self.v[2 * m], im: self.v[n - 1 - 2 * m] };
-            self.z.push(wv.mul(self.pre[m]));
+        if output.len() != coefficients {
+            return Err(Error::Length { expected: coefficients, actual: output.len() });
         }
-        self.fft.process(&mut self.z, &mut self.scratch);
-        for p in 0..n2 {
-            let y = self.z[p].mul(self.post[p]);
-            out[2 * p] = y.re * self.scale;
-            out[n - 1 - 2 * p] = -y.im * self.scale;
+        let pad = (coefficients - OVERLAP) / 2;
+        for ((sample, value), gain) in self.input.iter_mut().skip(pad).zip(block).zip(&self.gains) {
+            *sample = value * gain;
         }
+        self.transform.process_into(&self.input, output)?;
+        for value in output {
+            *value *= 2.0 / coefficients as f32;
+        }
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use craft_fft::{Complex, ComplexFft, Direction};
 
-    /// Direct MDCT definition X[k] = sum u[t] cos(pi/N (t + 1/2 + N/2)(k + 1/2)).
-    fn direct(block: &[f32], n: usize, window: &[f32; OVERLAP]) -> Vec<f64> {
-        let pad = (n - OVERLAP) / 2;
-        let mut u = vec![0f64; 2 * n];
-        for (j, &b) in block.iter().enumerate() {
-            let g = if j < OVERLAP {
-                window[j]
-            } else if j >= n {
-                window[OVERLAP - 1 - (j - n)]
+    fn direct(block: &[f32], coefficients: usize, window: &[f32; OVERLAP]) -> Vec<f64> {
+        let pad = (coefficients - OVERLAP) / 2;
+        let mut input = vec![0.0f64; 2 * coefficients];
+        for (index, &value) in block.iter().enumerate() {
+            let gain = if index < OVERLAP {
+                window[index]
+            } else if index >= coefficients {
+                window[OVERLAP - 1 - (index - coefficients)]
             } else {
                 1.0
             };
-            u[pad + j] = (b * g) as f64;
+            input[pad + index] = (value * gain) as f64;
         }
-        (0..n)
-            .map(|k| {
-                (0..2 * n).map(|t| u[t] * (std::f64::consts::PI / n as f64 * (t as f64 + 0.5 + n as f64 / 2.0) * (k as f64 + 0.5)).cos()).sum::<f64>() * 2.0
-                    / n as f64
+        (0..coefficients)
+            .map(|bin| {
+                input
+                    .iter()
+                    .enumerate()
+                    .map(|(time, sample)| {
+                        sample * (std::f64::consts::PI / coefficients as f64 * (time as f64 + 0.5 + coefficients as f64 / 2.0) * (bin as f64 + 0.5)).cos()
+                    })
+                    .sum::<f64>()
+                    * 2.0
+                    / coefficients as f64
             })
             .collect()
     }
 
     #[test]
-    fn fft_matches_dft() {
-        // Every radix combination, including the 480-point size of the 20 ms frame.
-        for &n in &[2usize, 3, 4, 5, 6, 8, 12, 15, 16, 20, 24, 30, 48, 60, 120, 240, 480] {
-            let fft = Fft::new(n);
-            let x: Vec<Cpx> = (0..n).map(|i| Cpx { re: ((i * 37 % 101) as f32 - 50.0) / 7.0, im: ((i * 53 % 89) as f32 - 44.0) / 9.0 }).collect();
-            let mut y = x.clone();
-            fft.process(&mut y, &mut Vec::new());
-            for k in 0..n {
-                let (mut re, mut im) = (0f64, 0f64);
-                for (j, v) in x.iter().enumerate() {
-                    let ph = -2.0 * std::f64::consts::PI * ((j * k) % n) as f64 / n as f64;
-                    re += v.re as f64 * ph.cos() - v.im as f64 * ph.sin();
-                    im += v.re as f64 * ph.sin() + v.im as f64 * ph.cos();
+    fn craft_fft_matches_dft() {
+        for length in [2usize, 3, 4, 5, 6, 8, 12, 15, 16, 20, 24, 30, 48, 60, 120, 240, 480] {
+            let mut fft = ComplexFft::new(length).unwrap();
+            let input: Vec<_> =
+                (0..length).map(|index| Complex::new(((index * 37 % 101) as f32 - 50.0) / 7.0, ((index * 53 % 89) as f32 - 44.0) / 9.0)).collect();
+            let mut output = input.clone();
+            fft.process_in_place(Direction::Forward, &mut output).unwrap();
+            for (bin, actual) in output.iter().enumerate() {
+                let mut expected = Complex::new(0.0f64, 0.0);
+                for (index, value) in input.iter().enumerate() {
+                    let phase = -std::f64::consts::TAU * ((index * bin) % length) as f64 / length as f64;
+                    expected += Complex::new(value.re as f64, value.im as f64) * Complex::new(phase.cos(), phase.sin());
                 }
-                assert!((y[k].re as f64 - re).abs() < 2e-3 && (y[k].im as f64 - im).abs() < 2e-3, "n={n} k={k}: ({}, {}) vs ({re}, {im})", y[k].re, y[k].im);
+                assert!((actual.re as f64 - expected.re).abs() < 2e-3 && (actual.im as f64 - expected.im).abs() < 2e-3, "length={length} bin={bin}");
             }
         }
     }
 
     #[test]
     fn matches_direct_formula() {
-        for &n in &[240usize, 960] {
-            let block: Vec<f32> = (0..n + OVERLAP).map(|i| ((i * 37 % 101) as f32 - 50.0) / 7.0).collect();
-            let mut m = Mdct::new(n);
-            let mut out = vec![0f32; n];
-            m.forward(&block, &mut out);
-            let d = direct(&block, n, &m.window);
-            for k in 0..n {
-                assert!((out[k] as f64 - d[k]).abs() < 1e-2, "n={n} k={k}: {} vs {}", out[k], d[k]);
+        for coefficients in [120usize, 240, 480, 960] {
+            let block: Vec<f32> = (0..coefficients + OVERLAP).map(|index| ((index * 37 % 101) as f32 - 50.0) / 7.0).collect();
+            let mut transform = Mdct::new(coefficients).unwrap();
+            let mut output = vec![0.0; coefficients];
+            transform.forward(&block, &mut output).unwrap();
+            let expected = direct(&block, coefficients, &transform.window);
+            for (bin, (actual, reference)) in output.iter().zip(expected).enumerate() {
+                assert!((*actual as f64 - reference).abs() < 1e-2, "coefficients={coefficients} bin={bin}: {actual} vs {reference}");
             }
         }
     }
 
-    // ---- Replica of the RFC 6716 decoder inverse MDCT (as in FilmCraft's decoder) ----
-
-    fn imdct_backward(n_full: usize, input: &[f32], out: &mut [f32], window: &[f32]) {
-        let n2 = n_full >> 1;
-        let n4 = n_full >> 2;
-        let t: Vec<f32> = (0..n2).map(|i| (2.0 * std::f64::consts::PI * (i as f64 + 0.125) / n_full as f64).cos() as f32).collect();
-        let fft = Fft::new(n4);
-        let mut z = Vec::new();
-        for i in 0..n4 {
-            let x1 = input[2 * i];
-            let x2 = input[n2 - 1 - 2 * i];
-            let yr = x2 * t[i] + x1 * t[n4 + i];
-            let yi = x1 * t[i] - x2 * t[n4 + i];
-            z.push(Cpx { re: yi, im: yr });
-        }
-        fft.process(&mut z, &mut Vec::new());
-        let overlap = OVERLAP;
-        let base = overlap >> 1;
-        let y = &mut out[base..base + n2];
-        for i in 0..n4.div_ceil(2) {
-            let front = z[i];
-            let back = z[n4 - 1 - i];
-            let (re, im) = (front.im, front.re);
-            let (t0, t1) = (t[i], t[n4 + i]);
-            let yr0 = re * t0 + im * t1;
-            let yi0 = re * t1 - im * t0;
-            let (re, im) = (back.im, back.re);
-            let (t0, t1) = (t[n4 - i - 1], t[n2 - i - 1]);
-            let yr1 = re * t0 + im * t1;
-            let yi1 = re * t1 - im * t0;
-            y[2 * i] = yr0;
-            y[n2 - 1 - 2 * i] = yi0;
-            y[n2 - 2 - 2 * i] = yr1;
-            y[2 * i + 1] = yi1;
-        }
-        for i in 0..overlap / 2 {
-            let x1 = out[overlap - 1 - i];
-            let x2 = out[i];
-            let w1 = window[i];
-            let w2 = window[overlap - 1 - i];
-            out[i] = x2 * w2 - x1 * w1;
-            out[overlap - 1 - i] = x2 * w1 + x1 * w2;
+    /// FilmCraft's CELT inverse adapter: retain the middle N samples, undo the
+    /// sine window and 2/N scale, then rotate the 120-sample low-overlap tail.
+    #[test]
+    fn perfect_reconstruction_through_decoder_imdct() {
+        for coefficients in [120usize, 240, 480, 960] {
+            let frames = 5;
+            let signal: Vec<f32> =
+                (0..coefficients * frames).map(|index| (index as f32 * 0.013).sin() * 1000.0 + ((index * 7919) % 211) as f32 - 105.0).collect();
+            let mut forward = Mdct::new(coefficients).unwrap();
+            let mut inverse = craft_fft::Imdct::new(coefficients, TdacWindow::Sine).unwrap();
+            let half = coefficients / 2;
+            let gains: Vec<f32> = inverse.window()[half..3 * half].iter().map(|window| half as f32 / window).collect();
+            let mut inverse_output = vec![0.0; 2 * coefficients];
+            let mut history = vec![0.0; OVERLAP];
+            let mut memory = vec![0.0; coefficients + OVERLAP];
+            let mut decoded = Vec::new();
+            for frame in signal.chunks_exact(coefficients) {
+                let mut block = history.clone();
+                block.extend_from_slice(frame);
+                history.copy_from_slice(&block[coefficients..]);
+                let mut spectrum = vec![0.0; coefficients];
+                forward.forward(&block, &mut spectrum).unwrap();
+                memory.copy_within(coefficients..coefficients + OVERLAP / 2, 0);
+                inverse.process_into(&spectrum, &mut inverse_output).unwrap();
+                for ((sample, value), gain) in memory[OVERLAP / 2..OVERLAP / 2 + coefficients].iter_mut().zip(&inverse_output[half..3 * half]).zip(&gains) {
+                    *sample = value * gain;
+                }
+                for index in 0..OVERLAP / 2 {
+                    let left = memory[index];
+                    let right = memory[OVERLAP - 1 - index];
+                    let rising = forward.window[index];
+                    let falling = forward.window[OVERLAP - 1 - index];
+                    memory[index] = left * falling - right * rising;
+                    memory[OVERLAP - 1 - index] = left * rising + right * falling;
+                }
+                decoded.extend_from_slice(&memory[..coefficients]);
+            }
+            let mut error = 0.0f64;
+            let mut energy = 0.0f64;
+            for (actual, reference) in decoded[OVERLAP..].iter().zip(&signal) {
+                error += (*actual as f64 - *reference as f64).powi(2);
+                energy += (*reference as f64).powi(2);
+            }
+            let snr = 10.0 * (energy / error).log10();
+            assert!(snr > 80.0, "coefficients={coefficients}: reconstruction SNR {snr:.1} dB");
         }
     }
 
-    /// MDCT analysis followed by the decoder's IMDCT + TDAC overlap-add reproduces the input
-    /// delayed by exactly `OVERLAP` samples.
     #[test]
-    fn perfect_reconstruction_through_decoder_imdct() {
-        let n = 960;
-        let frames = 5;
-        let sig: Vec<f32> = (0..n * frames).map(|i| (i as f32 * 0.013).sin() * 1000.0 + ((i * 7919) % 211) as f32 - 105.0).collect();
-        let mut m = Mdct::new(n);
-        let mut hist = vec![0f32; OVERLAP];
-        // Decoder memory: [frame output n][folded tail OVERLAP/2] laid out like decode_mem.
-        let mut mem = vec![0f32; n + OVERLAP];
-        let mut decoded = Vec::new();
-        for f in 0..frames {
-            let mut block = hist.clone();
-            block.extend_from_slice(&sig[f * n..(f + 1) * n]);
-            hist.copy_from_slice(&block[n..]);
-            let mut coefs = vec![0f32; n];
-            m.forward(&block, &mut coefs);
-            // Shift: the previous folded tail (at n..n+OVERLAP/2) moves to 0..OVERLAP/2.
-            mem.copy_within(n..n + OVERLAP / 2, 0);
-            imdct_backward(2 * n, &coefs, &mut mem, &m.window);
-            decoded.extend_from_slice(&mem[..n]);
+    fn processing_including_first_call_does_not_allocate() {
+        for coefficients in [120usize, 240, 480, 960] {
+            let mut transform = Mdct::new(coefficients).unwrap();
+            let input = vec![0.25; coefficients + OVERLAP];
+            let mut output = vec![0.0; coefficients];
+            let allocations = allocation_counter::measure(|| {
+                for _ in 0..16 {
+                    transform.forward(&input, &mut output).unwrap();
+                }
+            });
+            assert_eq!(allocations.count_total, 0);
         }
-        let mut err = 0f64;
-        let mut sum = 0f64;
-        for t in OVERLAP..n * frames {
-            let d = decoded[t] as f64 - sig[t - OVERLAP] as f64;
-            err += d * d;
-            sum += (sig[t - OVERLAP] as f64).powi(2);
+    }
+
+    #[test]
+    fn invalid_arguments_leave_output_untouched() {
+        for coefficients in [0, 119, 121, 239, 961, usize::MAX] {
+            assert!(matches!(Mdct::new(coefficients), Err(Error::InvalidSize)));
         }
-        let snr = 10.0 * (sum / err).log10();
-        assert!(snr > 80.0, "reconstruction SNR {snr:.1} dB");
+        let mut transform = Mdct::new(960).unwrap();
+        for (input_length, output_length) in [(1079, 960), (1081, 960), (1080, 959), (1080, 961)] {
+            let mut output = vec![7.0; output_length];
+            assert!(transform.forward(&vec![0.0; input_length], &mut output).is_err());
+            assert!(output.iter().all(|value| *value == 7.0));
+        }
     }
 }

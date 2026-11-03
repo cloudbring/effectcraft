@@ -10,7 +10,7 @@
 //!   above in the same range-coded frame; constant packet size.
 //! - **CELT** (fullband): MDCT transform coding; constant packet size.
 //!
-//! Layer L0: no dependencies beyond `std`; no `unsafe`; builds for `wasm32-unknown-unknown`.
+//! Layer L0: shared `craft-fft` transforms; no `unsafe`; builds for `wasm32-unknown-unknown`.
 //!
 //! ```
 //! use effectcraft_opusenc::{Application, Mode, OpusEncoder};
@@ -230,7 +230,8 @@ impl OpusEncoder {
             bandwidth,
             bitrate_bps,
             frame_bytes,
-            mdct: Mdct::new(N),
+            #[allow(clippy::expect_used)]
+            mdct: Mdct::new(N).expect("the literal 960-coefficient CELT mode is supported"),
             preemph_mem: [0.0; 2],
             hist: vec![0.0; c * OVERLAP],
             old_band_e: [0.0; 2 * NB_EBANDS],
@@ -395,7 +396,8 @@ impl OpusEncoder {
             self.hist[ch * OVERLAP..(ch + 1) * OVERLAP].copy_from_slice(&self.block[N..]);
             peak = self.block.iter().fold(peak, |p, v| p.max(v.abs()));
             let freq = &mut self.freq[ch * N..(ch + 1) * N];
-            self.mdct.forward(&self.block, freq);
+            #[allow(clippy::expect_used)]
+            self.mdct.forward(&self.block, freq).expect("internal CELT buffers have the literal lengths 1080 and 960");
             for i in 0..NB_EBANDS {
                 let lo = (EBANDS[i] as usize) << LM;
                 let hi = (EBANDS[i + 1] as usize) << LM;

@@ -1,6 +1,6 @@
 # effectcraft-opusenc
 
-Clean-room, pure-Rust Opus encoder for EffectCraft's WebM export audio (layer L0, `std` only,
+Clean-room, pure-Rust Opus encoder for EffectCraft's WebM export audio (layer L0, `craft-fft` transforms,
 no `unsafe`, builds for `wasm32-unknown-unknown`).
 
 All three Opus modes, 20 ms packets (one frame per packet), 48 kHz float input, mono or stereo:
@@ -79,7 +79,7 @@ frames, decoder band-energy reset for uncoded bands mirrored). SILK gets 72 % (S
 of the per-channel bitrate, at most the bitrate minus 6 kb/s, and never more than leaves CELT a
 fifth of the packet (at least 80 bits).
 
-**CELT** (unchanged): forward MDCT with the low-overlap window, band energies with inter/intra
+**CELT**: shared forward MDCT with the low-overlap window, band energies with inter/intra
 coarse prediction, fine and final energy bits, the decoder's exact bit allocation, spreading,
 recursive band splitting, greedy PVQ search. Not implemented: transient frames, TF changes,
 pitch post-filter, intensity stereo, dynamic allocation, VBR. All-zero CELT frames become 3-byte
@@ -120,6 +120,60 @@ narrowband files encoded by libopus itself.
   (October 2017) as implemented by the decoder we round-trip against.
 - RFC 7845, *Ogg Encapsulation for the Opus Audio Codec* (April 2016), §5.1 `OpusHead` and
   §4.2 pre-skip.
+
+## Shared transforms and CELT table API (#49)
+
+`craft-fft` and the test decoder `craft-opus` use `cloudbring/craft-libs` branch
+`algo/integration`, locked at `249cbcc191bbf14558577677b239a45a7e724c72`. Repoint both
+dependencies to the upstream release/revision when that branch lands.
+
+The analysis adapter pads N+120 samples at offset (N−120)/2 in a 2N block, multiplies
+by the CELT/sine window ratio, and scales `craft_fft::Mdct` output by 2/N. Plans,
+gains and scratch are cached; the first and subsequent transforms allocate nothing.
+Tests use `craft_fft::Imdct` with FilmCraft a29f2893's middle-half extraction,
+N/2 inverse scaling and low-overlap TDAC rotation. All four CELT sizes are tested.
+No craft-fft API addition is needed. CELT framing/windowing belongs in the codec;
+if shared later, put the adapter in craft-opus, not the codec-neutral craft-fft.
+
+**No CELT table is currently publicly importable.** `craft-opus::celt` and its
+submodules are `pub(crate)`. Existing definitions remain unchanged, not newly
+copied. A standalone Rust equality check verified every integer entry and every
+float's `to_bits()` in the following existing definitions against that revision:
+
+- Proposed public `craft_opus::celt_tables` re-exports: `NB_EBANDS`, `EBANDS`,
+  `OVERLAP`, `MAX_LM`, `PREEMPH`, `ALLOC`, `E_MEANS`, `PRED_COEF`, `BETA_COEF`,
+  `BETA_INTRA`, `E_PROB_MODEL`, `SMALL_ENERGY_ICDF`, `LOG2_FRAC_TABLE`,
+  `TF_SELECT_TABLE`, `SPREAD_ICDF`, `TRIM_ICDF` (16 definitions, 11 arrays).
+- Also move/re-export the byte-identical function-local `EXP2_TABLE8: [i32; 8]`
+  and `SPREAD_FACTOR: [usize; 3]` from `celt::bands` into that public table API.
+- Identical rate constants still private to the codec: `MAX_PSEUDO`,
+  `LOG_MAX_PSEUDO`, `MAX_FINE_BITS`, `FINE_OFFSET`, `QTHETA_OFFSET`,
+  `QTHETA_OFFSET_TWOPHASE`, `ALLOC_STEPS` (all `i32`); expose them there too.
+
+After these API additions, replace the local definitions with imports and move
+craft-opus from dev-dependencies to dependencies. Generated PVQ/pulse caches and
+SILK codebooks are outside this constant-table migration.
+
+Validation on 2026-11-03, rustup stable rustc 1.99.0, aarch64-apple-darwin:
+the existing suites retained their SNR/spectral tolerances. Of 7,179 packets captured
+from their shared encode helpers, 505 changed; maximum decoded PCM difference from
+the old encoder through the same FilmCraft decoder was 0.034308255 (stereo 128 kb/s).
+This is quantizer/bitstream divergence, not just inverse-transform rounding.
+The checkout has 10 export `opus_roundtrip` tests (not 11) and originally 12 opusenc
+integration tests; the added shared-decoder comparison brings the latter to 13.
+The new comparison covers mono/stereo CELT, hybrid SWB/FB and SILK WB; decoding
+the same packets with craft-opus versus FilmCraft differs by at most 1.1920929e-7.
+Package tests: 151 passed, 0 failed, 1 pre-existing ignored VP9 benchmark.
+Package clippy (`--all-targets -- -D warnings`), fmt and `cargo xtask layers` pass.
+Workspace-wide CI, tests/clippy, assets and wasm gates were intentionally skipped.
+
+Reproduce the benchmark with `cargo run --release -p effectcraft-opusenc --example
+encode_benchmark`: 60 s stereo 48 kHz, 128 kb/s, deterministic two-tone channels,
+pre-generated PCM, one-second warm-up, encoding only (not decoding or construction).
+Nine trials each, alternating the original and migrated release executables:
+median **0.134372 s before / 0.117525 s after**; each emitted 960,000 packet bytes.
+Observed ranges were 0.126179–0.172061 s before and 0.115725–0.123561 s after.
+These are warm local timings, not an end-to-end export or quality benchmark.
 
 ## Provenance
 

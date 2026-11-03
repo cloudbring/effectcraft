@@ -10,6 +10,11 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+# TODO(#49): repoint to the upstream craft-libs release/revision after algo/integration lands.
+craft-fft = { git = "https://github.com/cloudbring/craft-libs", branch = "algo/integration" }
 
 [dev-dependencies]
+# TODO(#49): repoint upstream; promote to dependencies when CELT tables are exported.
+craft-opus = { git = "https://github.com/cloudbring/craft-libs", branch = "algo/integration" }
+allocation-counter = "0.8.1"
 filmcraft-opus = { workspace = true }
