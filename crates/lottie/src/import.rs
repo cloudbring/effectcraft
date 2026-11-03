@@ -53,7 +53,7 @@ fn hex_color(sc: &str) -> [f32; 3] {
     [c(0), c(2), c(4)]
 }
 
-/// The Lottie JSON inside raw bytes (plain JSON, or a stored dotLottie archive).
+/// The Lottie JSON inside raw bytes (plain JSON, or a dotLottie ZIP archive).
 fn document(bytes: &[u8]) -> Result<Json, LottieError> {
     if bytes.starts_with(b"PK") {
         let entries = crate::zip::read_stored(bytes);
@@ -61,7 +61,7 @@ fn document(bytes: &[u8]) -> Result<Json, LottieError> {
             .iter()
             .find(|(n, _)| n.starts_with("animations/") && n.ends_with(".json"))
             .or_else(|| entries.iter().find(|(n, _)| n.ends_with(".json") && n != "manifest.json"))
-            .ok_or_else(|| LottieError::Parse("dotLottie archive without an uncompressed animation".into()))?;
+            .ok_or_else(|| LottieError::Parse("dotLottie archive without an animation".into()))?;
         return serde_json::from_slice(&anim.1).map_err(|e| LottieError::Parse(e.to_string()));
     }
     serde_json::from_slice(bytes).map_err(|e| LottieError::Parse(e.to_string()))
@@ -107,7 +107,7 @@ fn external_image(stored: &str, base_dir: &str) -> Result<String, String> {
     }
 }
 
-/// Import a Lottie document (JSON or a stored `.lottie` archive) into `project` as a new
+/// Import a Lottie document (JSON or a `.lottie` ZIP archive) into `project` as a new
 /// composition. `store` saves embedded images and returns the file path to use;
 /// `base_dir` resolves external image references.
 pub fn import(

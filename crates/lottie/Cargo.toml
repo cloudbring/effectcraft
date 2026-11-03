@@ -10,6 +10,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+craft-archive = { workspace = true }
 craft-docpath = { workspace = true }
 effectcraft-time = { workspace = true }
 effectcraft-color = { workspace = true }
@@ -24,3 +25,4 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 effectcraft-render = { workspace = true }
+zip = { version = "9", default-features = false, features = ["deflate"] }

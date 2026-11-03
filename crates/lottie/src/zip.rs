@@ -1,121 +1,99 @@
-//! A minimal ZIP writer (stored entries, PKWARE APPNOTE 6.3 local headers + central directory)
-//! for `.lottie` (dotLottie) archives.
+//! ZIP helpers for `.lottie` (dotLottie) archives.
 
-fn crc32(data: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFFu32;
-    for &b in data {
-        crc ^= b as u32;
-        for _ in 0..8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
-        }
-    }
-    !crc
+use craft_archive::{ZipLimits, ZipReader, ZipWriter};
+
+const MAX_ENTRIES: usize = 1_024;
+const MAX_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
+
+fn limits() -> ZipLimits {
+    ZipLimits { max_entries: MAX_ENTRIES, max_entry_bytes: MAX_ENTRY_BYTES, max_total_bytes: MAX_TOTAL_BYTES }
 }
 
-/// Build a ZIP archive with the given (name, bytes) entries, uncompressed.
+/// Build a deterministic stored ZIP archive with the given (name, bytes) entries.
 pub fn store(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut central = Vec::new();
-    let put16 = |v: &mut Vec<u8>, x: u16| v.extend_from_slice(&x.to_le_bytes());
-    let put32 = |v: &mut Vec<u8>, x: u32| v.extend_from_slice(&x.to_le_bytes());
-    for (name, data) in entries {
-        let offset = out.len() as u32;
-        let crc = crc32(data);
-        let n = name.as_bytes();
-        // Local file header.
-        put32(&mut out, 0x0403_4b50);
-        put16(&mut out, 20); // version needed
-        put16(&mut out, 0x0800); // flags: UTF-8 names
-        put16(&mut out, 0); // stored
-        put16(&mut out, 0); // time
-        put16(&mut out, 0x21); // date (1980-01-01)
-        put32(&mut out, crc);
-        put32(&mut out, data.len() as u32);
-        put32(&mut out, data.len() as u32);
-        put16(&mut out, n.len() as u16);
-        put16(&mut out, 0);
-        out.extend_from_slice(n);
-        out.extend_from_slice(data);
-        // Central directory record.
-        put32(&mut central, 0x0201_4b50);
-        put16(&mut central, 20); // made by
-        put16(&mut central, 20);
-        put16(&mut central, 0x0800);
-        put16(&mut central, 0);
-        put16(&mut central, 0);
-        put16(&mut central, 0x21);
-        put32(&mut central, crc);
-        put32(&mut central, data.len() as u32);
-        put32(&mut central, data.len() as u32);
-        put16(&mut central, n.len() as u16);
-        put16(&mut central, 0); // extra
-        put16(&mut central, 0); // comment
-        put16(&mut central, 0); // disk
-        put16(&mut central, 0); // internal attrs
-        put32(&mut central, 0); // external attrs
-        put32(&mut central, offset);
-        central.extend_from_slice(n);
-    }
-    let cd_offset = out.len() as u32;
-    let cd_len = central.len() as u32;
-    out.extend_from_slice(&central);
-    put32(&mut out, 0x0605_4b50);
-    put16(&mut out, 0);
-    put16(&mut out, 0);
-    put16(&mut out, entries.len() as u16);
-    put16(&mut out, entries.len() as u16);
-    put32(&mut out, cd_len);
-    put32(&mut out, cd_offset);
-    put16(&mut out, 0);
-    out
-}
-
-/// Whether an entry name is a relative path inside the archive: not absolute (`/…`, `\…`), no
-/// drive (`C:…`) and no `..` component.
-fn is_relative_name(name: &str) -> bool {
-    let drive = name.as_bytes().get(1) == Some(&b':');
-    !name.starts_with(['/', '\\']) && !drive && !name.split(['/', '\\']).any(|c| c == "..")
-}
-
-/// Read the stored (uncompressed) entries of a ZIP archive written by [`store`] or any other
-/// writer that did not compress. Compressed entries and entries whose names are not relative
-/// paths inside the archive are skipped.
-pub fn read_stored(data: &[u8]) -> Vec<(String, Vec<u8>)> {
-    let mut out = vec![];
-    let mut i = 0usize;
-    let u16_at = |p: usize| data.get(p..p + 2).map(|b| u16::from_le_bytes([b[0], b[1]]) as usize);
-    let u32_at = |p: usize| data.get(p..p + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize);
-    while u32_at(i) == Some(0x0403_4b50) {
-        let (Some(method), Some(size), Some(nlen), Some(xlen)) = (u16_at(i + 8), u32_at(i + 18), u16_at(i + 26), u16_at(i + 28)) else { break };
-        let name_start = i + 30;
-        let body = name_start + nlen + xlen;
-        let (Some(name), Some(bytes)) = (data.get(name_start..name_start + nlen), data.get(body..body + size)) else { break };
-        let name = String::from_utf8_lossy(name).to_string();
-        if method == 0 && is_relative_name(&name) {
-            out.push((name, bytes.to_vec()));
+    let mut writer = ZipWriter::in_memory();
+    for (name, bytes) in entries {
+        if writer.add_stored(name, bytes).is_err() {
+            return Vec::new();
         }
-        i = body + size;
     }
-    out
+    match writer.finish() {
+        Ok(output) => output.into_inner(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Read bounded, relative-path entries from a dotLottie ZIP archive.
+///
+/// dotLottie permits DEFLATE compression, so [`ZipReader`] accepts both stored and deflated
+/// entries after validating names, declared sizes, decoded sizes, CRCs, and total output.
+pub fn read_stored(data: &[u8]) -> Vec<(String, Vec<u8>)> {
+    let Ok(mut reader) = ZipReader::open(data, limits()) else {
+        return Vec::new();
+    };
+    let names = reader.names().to_vec();
+    let mut entries = Vec::new();
+    for name in names {
+        match reader.read(&name) {
+            Ok(Some(bytes)) => entries.push((name, bytes)),
+            Ok(None) | Err(_) => return Vec::new(),
+        }
+    }
+    entries
 }
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn crc_and_roundtrip() {
-        assert_eq!(super::crc32(b"123456789"), 0xCBF4_3926);
-        let z = super::store(&[("a.json".into(), b"{}".to_vec()), ("b/c.txt".into(), b"hello".to_vec())]);
-        let back = super::read_stored(&z);
-        assert_eq!(back.len(), 2);
-        assert_eq!(back[1].0, "b/c.txt");
-        assert_eq!(back[1].1, b"hello");
+    use std::io::{Cursor, Read, Write};
+
+    use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
+
+    fn zip(entries: &[(&str, &[u8])], method: CompressionMethod) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        let options = SimpleFileOptions::default().compression_method(method);
+        for (name, bytes) in entries {
+            writer.start_file(name, options)?;
+            writer.write_all(bytes)?;
+        }
+        Ok(writer.finish()?.into_inner())
     }
 
     #[test]
-    fn entries_outside_the_archive_root_are_skipped() {
-        let names = ["../up.txt", "a/../../up.txt", "/abs/x", "\\abs\\x", "C:\\x", "c:x", "a\\..\\x", "ok/x.txt", "ok/..x"];
-        let z = super::store(&names.iter().map(|n| (n.to_string(), b"x".to_vec())).collect::<Vec<_>>());
-        let back: Vec<String> = super::read_stored(&z).into_iter().map(|(n, _)| n).collect();
-        assert_eq!(back, ["ok/x.txt", "ok/..x"]);
+    fn store_reopens_with_zip_and_roundtrips() -> Result<(), Box<dyn std::error::Error>> {
+        let entries = [("a.json".to_string(), b"{}".to_vec()), ("b/c.txt".to_string(), b"hello".to_vec())];
+        let bytes = super::store(&entries);
+        let mut archive = ZipArchive::new(Cursor::new(&bytes))?;
+        assert_eq!(archive.len(), entries.len());
+        for (index, (name, expected)) in entries.iter().enumerate() {
+            let mut entry = archive.by_index(index)?;
+            assert_eq!(entry.name()?.as_ref(), name);
+            let mut actual = Vec::new();
+            entry.read_to_end(&mut actual)?;
+            assert_eq!(actual, *expected);
+        }
+        assert_eq!(super::read_stored(&bytes), entries);
+        Ok(())
+    }
+
+    #[test]
+    fn deflated_dotlottie_entries_are_accepted() -> Result<(), Box<dyn std::error::Error>> {
+        let bytes = zip(&[("animations/main.json", b"{}")], CompressionMethod::Deflated)?;
+        assert_eq!(super::read_stored(&bytes), [("animations/main.json".to_string(), b"{}".to_vec())]);
+        Ok(())
+    }
+
+    #[test]
+    fn hostile_archives_are_rejected_without_panicking() -> Result<(), Box<dyn std::error::Error>> {
+        let unsafe_name = zip(&[("../up.txt", b"x")], CompressionMethod::Stored)?;
+        assert!(super::read_stored(&unsafe_name).is_empty());
+
+        let mut oversized = super::store(&[("ok.txt".to_string(), b"x".to_vec())]);
+        for signature in [b"PK\x03\x04".as_slice(), b"PK\x01\x02".as_slice()] {
+            let offset = oversized.windows(signature.len()).position(|window| window == signature).ok_or("missing ZIP header")?;
+            oversized[offset + 24..offset + 28].copy_from_slice(&u32::try_from(super::MAX_ENTRY_BYTES + 1)?.to_le_bytes());
+        }
+        assert!(super::read_stored(&oversized).is_empty());
+        Ok(())
     }
 }
