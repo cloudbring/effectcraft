@@ -70,9 +70,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = path.with_extension("part");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
+    craft_atomic::atomic_write(path, bytes)
 }
 
 /// [`integrate`] for this process: when started from an AppImage, with the XDG data folders of
@@ -93,6 +91,57 @@ pub fn integrate_from_env(icon: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct SyncFailure;
+
+    impl craft_atomic::AtomicFs for SyncFailure {
+        fn create_new(&self, path: &Path, permissions: craft_atomic::NewFilePermissions) -> std::io::Result<std::fs::File> {
+            craft_atomic::AtomicFs::create_new(&craft_atomic::RealFs, path, permissions)
+        }
+        fn sync(&self, _: &std::fs::File) -> std::io::Result<()> {
+            Err(std::io::Error::other("simulated power failure"))
+        }
+        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            craft_atomic::AtomicFs::rename(&craft_atomic::RealFs, from, to)
+        }
+        fn hard_link(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            craft_atomic::AtomicFs::hard_link(&craft_atomic::RealFs, from, to)
+        }
+        fn remove(&self, path: &Path) -> std::io::Result<()> {
+            craft_atomic::AtomicFs::remove(&craft_atomic::RealFs, path)
+        }
+        fn sync_dir(&self, dir: &Path) -> std::io::Result<()> {
+            craft_atomic::AtomicFs::sync_dir(&craft_atomic::RealFs, dir)
+        }
+        fn set_permissions(&self, file: &std::fs::File, permissions: std::fs::Permissions) -> std::io::Result<()> {
+            craft_atomic::AtomicFs::set_permissions(&craft_atomic::RealFs, file, permissions)
+        }
+    }
+
+    #[test]
+    fn failed_sync_preserves_old_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("effectcraft.desktop");
+        write_atomic(&path, b"old").unwrap();
+        assert!(craft_atomic::atomic_write_custom(&SyncFailure, craft_atomic::RenameRetry::platform(), &path, b"new").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"old");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn concurrent_writes_publish_complete_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("effectcraft.desktop");
+        let contents = [vec![b'a'; 8192], vec![b'b'; 8192]];
+        std::thread::scope(|scope| {
+            for content in &contents {
+                let path = &path;
+                scope.spawn(move || write_atomic(path, content).unwrap());
+            }
+        });
+        assert!(contents.contains(&std::fs::read(path).unwrap()));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
 
     #[test]
     fn exec_arguments_are_quoted_and_escaped() {
