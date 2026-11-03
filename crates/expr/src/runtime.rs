@@ -7,7 +7,7 @@ use std::mem::ManuallyDrop;
 
 use boa_engine::object::builtins::JsArray;
 use boa_engine::{Context, JsNativeError, JsObject, JsResult, JsString, JsValue, NativeFunction, Script, Source, js_string};
-use effectcraft_keyframe::Value;
+use effectcraft_keyframe::{Value, cubic_bezier_y_for_x};
 
 use crate::host::{Key, Req, Resp, secs};
 use crate::noise;
@@ -269,19 +269,29 @@ fn native_nesting(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<
     Ok(JsValue::undefined())
 }
 
+fn native_cubic_bezier(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
+    let x1 = num(args, 0, ctx)?;
+    let y1 = num(args, 1, ctx)?;
+    let x2 = num(args, 2, ctx)?;
+    let y2 = num(args, 3, ctx)?;
+    let x = num(args, 4, ctx)?;
+    Ok(JsValue::from(cubic_bezier_y_for_x(x1, y1, x2, y2, x)))
+}
+
 impl Runtime {
     fn new() -> Result<Runtime, String> {
         let mut ctx = Context::default();
         let limits = ctx.runtime_limits_mut();
         limits.set_loop_iteration_limit(LOOP_LIMIT);
         limits.set_recursion_limit(400);
-        let natives: [(JsString, usize, fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue>); 6] = [
+        let natives: [(JsString, usize, fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue>); 7] = [
             (js_string!("__stack"), 0, native_stack),
             (js_string!("__h"), 6, native_host),
             (js_string!("__wig"), 8, native_wiggle),
             (js_string!("__noise"), 3, native_noise),
             (js_string!("__rnd"), 6, native_random),
             (js_string!("__nest"), 1, native_nesting),
+            (js_string!("__nativeCubicBezier"), 5, native_cubic_bezier),
         ];
         for (name, len, f) in natives {
             ctx.register_global_callable(name, len, NativeFunction::from_fn_ptr(f)).map_err(|e| e.to_string())?;

@@ -5,6 +5,57 @@ fn s(x: f64) -> Tick {
 }
 
 #[test]
+fn cubic_bezier_matches_high_precision_oracle() {
+    fn random(seed: &mut u64) -> f64 {
+        *seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        (*seed >> 11) as f64 / (1u64 << 53) as f64
+    }
+    let mut seed = 101;
+    let mut max_error = 0.0_f64;
+    for index in 0..10_000 {
+        let (x1, y1, x2, y2, x) = match index {
+            0 => (0.0, 0.0, 1.0, 1.0, 0.0),
+            1 => (1.0, 0.0, 0.0, 1.0, 0.5 - 1e-12),
+            2 => (1.0, 0.0, 0.0, 1.0, 0.5 + 1e-12),
+            3 => (0.0, 1.0, 0.0, 1.0, 1e-12),
+            4 => (1.0, 0.0, 1.0, 0.0, 1.0 - 1e-12),
+            5 => (1.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0, 0.5),
+            _ => (random(&mut seed), random(&mut seed) * 3.0 - 1.0, random(&mut seed), random(&mut seed) * 3.0 - 1.0, random(&mut seed)),
+        };
+        let (mut lo, mut hi) = (0.0, 1.0);
+        for _ in 0..100 {
+            let mid = (lo + hi) * 0.5;
+            if bez(0.0, x1, x2, 1.0, mid) < x {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let want = bez(0.0, y1, y2, 1.0, (lo + hi) * 0.5);
+        let got = cubic_bezier_y_for_x(x1, y1, x2, y2, x);
+        assert!((bez(0.0, x1, x2, 1.0, solve_u(x1, x2, x)) - x).abs() <= 1e-7);
+        let error = (got - want).abs();
+        max_error = max_error.max(error);
+        assert!(error <= 1e-6, "case {index}: {error} (curve {x1}, {y1}, {x2}, {y2} at {x})");
+    }
+    println!("maximum cubic-bezier y error over 10,000 cases: {max_error:e}");
+}
+
+#[test]
+fn cubic_bezier_is_monotone_for_monotone_handles() {
+    for (x1, y1, x2, y2) in [(0.0, 0.0, 1.0, 1.0), (1.0, 1.0, 0.0, 0.0), (0.42, 0.0, 0.58, 1.0), (0.0, 0.7, 0.0, 0.3)] {
+        let mut last = 0.0;
+        for index in 0..=1000 {
+            let x = index as f64 / 1000.0;
+            let value = cubic_bezier_y_for_x(x1, y1, x2, y2, x);
+            assert!(value >= last - 1e-12, "curve {x1}, {y1}, {x2}, {y2} at {x}: {value} < {last}");
+            last = value;
+        }
+        assert_eq!(last, 1.0);
+    }
+}
+
+#[test]
 fn missing_spatial_keys_have_no_tangents_or_length() {
     let keys = vec![Keyframe::new(s(0.0), Value::Vec2([0.0, 0.0]))];
     for i in [1, usize::MAX] {

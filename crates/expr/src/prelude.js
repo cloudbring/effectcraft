@@ -209,9 +209,8 @@ function easeIn() { return __interp(__easeIn, arguments); }
 function easeOut() { return __interp(__easeOut, arguments); }
 
 // Cubic-Bezier easing (the CSS cubic-bezier() shape): [x1, y1, x2, y2], with x1 / x2 in 0..1
-// and y1 / y2 free (overshoot included). Solves x(u) = x by Newton–Raphson, then by bisection
-// when Newton leaves 0..1 or the derivative vanishes, and returns y(u). A curve that is not four
-// finite numbers is linear, never an error.
+// and y1 / y2 free (overshoot included). The native keyframe solver handles inversion.
+// A curve that is not four finite numbers is linear, never an error.
 function __cubicBezier(curve) {
   var x1, y1, x2, y2;
   if (Array.isArray(curve) && curve.length === 4) {
@@ -223,31 +222,8 @@ function __cubicBezier(curve) {
   }
   x1 = Math.max(0, Math.min(1, x1));
   x2 = Math.max(0, Math.min(1, x2));
-  function bx(u) { var v = 1 - u; return 3 * v * v * u * x1 + 3 * v * u * u * x2 + u * u * u; }
-  function dbx(u) { var v = 1 - u; return 3 * v * v * x1 + 6 * v * u * (x2 - x1) + 3 * u * u * (1 - x2); }
-  function by(u) { var v = 1 - u; return 3 * v * v * u * y1 + 3 * v * u * u * y2 + u * u * u; }
-  function dby(u) { var v = 1 - u; return 3 * v * v * y1 + 6 * v * u * (y2 - y1) + 3 * u * u * (1 - y2); }
   return function (x) {
-    if (x <= 0) return 0;
-    if (x >= 1) return 1;
-    var u = x;
-    for (var i = 0; i < 8; i++) {
-      var f = bx(u) - x;
-      var d = dbx(u);
-      if (Math.abs(d) < 1e-12) break;
-      // Stop when the *value* is accurate: near the endpoints dy/dx is steep, so a residual in x
-      // alone can still mean a visible error in y (f * dy/dx estimates it).
-      if (Math.abs(f * dby(u) / d) < 1e-9) return by(u);
-      var n = u - f / d;
-      if (!(n >= 0 && n <= 1)) break;
-      u = n;
-    }
-    var lo = 0, hi = 1;
-    for (var j = 0; j < 60; j++) {
-      var mid = (lo + hi) / 2;
-      if (bx(mid) < x) lo = mid; else hi = mid;
-    }
-    return by((lo + hi) / 2);
+    return __nativeCubicBezier(x1, y1, x2, y2, x);
   };
 }
 

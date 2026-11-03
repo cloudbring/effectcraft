@@ -16,6 +16,8 @@ pub mod value;
 use effectcraft_time::{TICKS_PER_SECOND, Tick};
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
+use std::cell::RefCell;
+use std::collections::VecDeque;
 pub use text_doc::{BaselineOption, CharStyle, Composer, Direction, FigureStyle, FigureWidth, Kerning, LineJoin, OpenType, ParaStyle, StyleRun};
 pub use value::{FeatherPoint, Gradient, Justify, ShapePath, TextDoc, Value};
 
@@ -182,46 +184,112 @@ fn bez_d(p0: f64, p1: f64, p2: f64, p3: f64, u: f64) -> f64 {
     3.0 * v * v * (p1 - p0) + 6.0 * v * u * (p2 - p1) + 3.0 * u * u * (p3 - p2)
 }
 
-/// Solve `bez(x0..x3, u) = x` for u in 0..1 (x curve monotone).
-fn solve_u(x0: f64, x1: f64, x2: f64, x3: f64, x: f64) -> f64 {
-    if x <= x0 {
+const EASE_SAMPLES: usize = 10;
+const EASE_CACHE_SIZE: usize = 8;
+
+struct EaseCurve {
+    x1: f64,
+    x2: f64,
+    samples: [f64; EASE_SAMPLES + 1],
+    last: Option<(f64, f64)>,
+}
+
+thread_local! {
+    static EASE_CURVES: RefCell<VecDeque<EaseCurve>> = const { RefCell::new(VecDeque::new()) };
+}
+
+/// Invert a monotone CSS time curve. The returned x residual is at most 1e-7; convergence is
+/// additionally checked in u (1e-12) because a tiny x residual at a flat handle can leave a
+/// visible error in y. Ten samples bracket Newton's initial guess; bisection stays in that
+/// bracket if the derivative vanishes or a Newton step leaves it.
+fn solve_u(x1: f64, x2: f64, x: f64) -> f64 {
+    if !x1.is_finite() || !x2.is_finite() || !x.is_finite() {
+        return x;
+    }
+    if x <= 0.0 {
         return 0.0;
     }
-    if x >= x3 {
+    if x >= 1.0 {
         return 1.0;
     }
-    if x1 == x3 && x2 == x0 {
+    if x1 == 1.0 && x2 == 0.0 {
         // Full influence on both sides has a flat time derivative at the midpoint.
         // Its exact inverse avoids cancellation and residual-only Newton convergence there.
-        let progress = (x - x0) / (x3 - x0);
-        return 0.5 + ((progress - 0.5) * 0.25).cbrt();
+        return 0.5 + ((x - 0.5) * 0.25).cbrt();
     }
-    let mut u = (x - x0) / (x3 - x0);
-    for _ in 0..8 {
-        let f = bez(x0, x1, x2, x3, u) - x;
-        let d = bez_d(x0, x1, x2, x3, u);
-        if d.abs() < 1e-12 {
-            break;
-        }
-        if (f / d).abs() < 1e-12 {
-            return u;
-        }
-        let n = u - f / d;
-        if !(0.0..=1.0).contains(&n) {
-            break;
-        }
-        u = n;
-    }
-    let (mut lo, mut hi) = (0.0, 1.0);
-    for _ in 0..60 {
-        let mid = (lo + hi) * 0.5;
-        if bez(x0, x1, x2, x3, mid) < x {
-            lo = mid;
+    EASE_CURVES.with_borrow_mut(|cache| {
+        let found = cache.iter().position(|curve| curve.x1 == x1 && curve.x2 == x2);
+        let mut curve = found.and_then(|index| cache.remove(index)).unwrap_or_else(|| EaseCurve {
+            x1,
+            x2,
+            samples: std::array::from_fn(|index| bez(0.0, x1, x2, 1.0, index as f64 / EASE_SAMPLES as f64)),
+            last: None,
+        });
+        let u = if let Some((_, last_u)) = curve.last.filter(|(last_x, _)| *last_x == x) {
+            last_u
         } else {
-            hi = mid;
+            let u = curve.invert(x);
+            curve.last = Some((x, u));
+            u
+        };
+        cache.push_front(curve);
+        cache.truncate(EASE_CACHE_SIZE);
+        u
+    })
+}
+
+impl EaseCurve {
+    fn invert(&self, x: f64) -> f64 {
+        let index = self.samples.partition_point(|&sample| sample < x).clamp(1, EASE_SAMPLES);
+        let (mut lo, mut hi) = ((index - 1) as f64 / EASE_SAMPLES as f64, index as f64 / EASE_SAMPLES as f64);
+        let (low_x, high_x) = (self.samples[index - 1], self.samples[index]);
+        let mut u = lo + if high_x > low_x { (x - low_x) / (high_x - low_x) } else { 0.5 } * (hi - lo);
+        for _ in 0..8 {
+            let f = bez(0.0, self.x1, self.x2, 1.0, u) - x;
+            if f == 0.0 {
+                return u;
+            }
+            if f < 0.0 {
+                lo = u;
+            } else {
+                hi = u;
+            }
+            let d = bez_d(0.0, self.x1, self.x2, 1.0, u);
+            if d <= 1e-12 {
+                break;
+            }
+            if (f / d).abs() < 1e-12 {
+                return u;
+            }
+            let n = u - f / d;
+            if !(lo..hi).contains(&n) {
+                break;
+            }
+            u = n;
         }
+        for _ in 0..48 {
+            let mid = (lo + hi) * 0.5;
+            if bez(0.0, self.x1, self.x2, 1.0, mid) < x {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+            if hi - lo <= 1e-12 {
+                break;
+            }
+        }
+        (lo + hi) * 0.5
     }
-    (lo + hi) * 0.5
+}
+
+/// CSS cubic-bezier easing for a normalized time `x`, with x handles in 0..1 and unrestricted
+/// y handles. Invalid numbers return linear progress instead of entering the numeric solver.
+pub fn cubic_bezier_y_for_x(x1: f64, y1: f64, x2: f64, y2: f64, x: f64) -> f64 {
+    if ![x1, y1, x2, y2, x].iter().all(|v| v.is_finite()) {
+        return x;
+    }
+    let u = solve_u(x1.clamp(0.0, 1.0), x2.clamp(0.0, 1.0), x);
+    bez(0.0, y1, y2, 1.0, u)
 }
 
 /// Fraction of progress 0..1 through a 1D Bezier temporal segment whose value goes from 0 to 1,
@@ -229,8 +297,7 @@ fn solve_u(x0: f64, x1: f64, x2: f64, x3: f64, x: f64) -> f64 {
 pub fn ease_progress(out_speed_n: f64, out_inf: f64, in_speed_n: f64, in_inf: f64, x: f64) -> f64 {
     // The time handles may cross. AE keeps both influences; rescaling them changes the ease.
     let (i0, i1) = (out_inf.clamp(0.0, 1.0), in_inf.clamp(0.0, 1.0));
-    let u = solve_u(0.0, i0, 1.0 - i1, 1.0, x);
-    bez(0.0, out_speed_n * i0, 1.0 - in_speed_n * i1, 1.0, u)
+    cubic_bezier_y_for_x(i0, out_speed_n * i0, 1.0 - i1, 1.0 - in_speed_n * i1, x)
 }
 
 /// Whether control point `c` lies on the segment `a`–`b` (within rounding), so a cubic with
@@ -608,7 +675,7 @@ fn segment_value_of<K: Borrow<Keyframe>>(keys: &[K], i: usize, t: Tick, spatial:
         let ei = if lin_in { Ease { speed: dv / dur, influence: 1.0 / 3.0 } } else { effective_ease(keys, i + 1, d, false, false) };
         // Bezier in (time, value) space directly: P1 = (i0, v0 + s0*i0*dur), P2 = (1-i1, v1 - s1*i1*dur).
         let (i0, i1) = (eo.influence.clamp(0.0, 1.0), ei.influence.clamp(0.0, 1.0));
-        let u = solve_u(0.0, i0, 1.0 - i1, 1.0, x);
+        let u = solve_u(i0, 1.0 - i1, x);
         let v = bez(ca[d], ca[d] + eo.speed * i0 * dur, cb[d] - ei.speed * i1 * dur, cb[d], u);
         out.push(v);
     }
