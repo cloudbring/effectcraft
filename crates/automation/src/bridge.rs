@@ -40,12 +40,26 @@ impl BridgeClient {
             .map_err(|e| Error::Bridge(format!("{}: {e}", self.addr)))?
             .next()
             .ok_or_else(|| Error::Bridge(format!("cannot resolve {}", self.addr)))?;
-        let s = TcpStream::connect_timeout(&sa, Duration::from_secs(5))
+        let mut s = TcpStream::connect_timeout(&sa, Duration::from_secs(5))
             .map_err(|e| Error::Bridge(format!("cannot connect to {} ({e}); start the app with `effectcraft --control <port>`", self.addr)))?;
         s.set_read_timeout(Some(READ_TIMEOUT)).ok();
         s.set_nodelay(true).ok();
+        #[cfg(not(test))]
+        let token = crate::security::client_token().map_err(|e| Error::Bridge(e.to_string()))?;
+        #[cfg(test)]
+        let token = "a".repeat(64);
+        writeln!(s, "{}", json!({"id": 0, "method": "auth", "params": {"token": token}})).map_err(|e| Error::Bridge(e.to_string()))?;
         let r = s.try_clone().map_err(|e| Error::Bridge(e.to_string()))?;
-        Ok((BufReader::new(r), s))
+        let mut reader = BufReader::new(r);
+        let mut line = String::new();
+        reader.read_line(&mut line).map_err(|e| Error::Bridge(format!("authentication failed: {e}")))?;
+        let reply: Value = serde_json::from_str(&line).map_err(|e| Error::Bridge(format!("invalid authentication reply: {e}")))?;
+        if reply.get("ok").and_then(Value::as_bool) != Some(true)
+            || reply.get("result").and_then(|v| v.get("authenticated")).and_then(Value::as_bool) != Some(true)
+        {
+            return Err(Error::Bridge("authentication rejected".into()));
+        }
+        Ok((reader, s))
     }
 
     /// Call a control method; returns the reply's `result`, or the app's `error` as [`Error::App`].

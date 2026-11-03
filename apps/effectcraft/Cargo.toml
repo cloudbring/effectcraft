@@ -10,6 +10,7 @@ default-run = "effectcraft"
 workspace = true
 
 [dependencies]
+effectcraft-automation = { workspace = true }
 effectcraft-engine = { workspace = true }
 effectcraft-host = { workspace = true }
 effectcraft-ui-egui = { workspace = true }

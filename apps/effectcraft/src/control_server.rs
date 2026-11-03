@@ -11,7 +11,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use effectcraft_ui_egui::ControlRequest;
 use serde_json::{Value, json};
@@ -31,13 +31,30 @@ pub fn start(port: u16, ctx: egui::Context) -> Receiver<ControlRequest> {
             return rx;
         }
     };
+    let token = match effectcraft_automation::security::generate_token() {
+        Ok(token) => token,
+        Err(error) => {
+            eprintln!("effectcraft: control server cannot generate token: {error}");
+            return rx;
+        }
+    };
+    if let Some(path) = std::env::var_os("EFFECTCRAFT_CONTROL_TOKEN_FILE") {
+        if let Err(error) = effectcraft_automation::security::write_token(std::path::Path::new(&path), &token) {
+            eprintln!("effectcraft: control server cannot create token file: {error}");
+            return rx;
+        }
+        eprintln!("effectcraft: control token file: {}", std::path::Path::new(&path).display());
+    } else {
+        eprintln!("effectcraft: control token: {token}");
+    }
     log::info!("control server listening on 127.0.0.1:{port}");
-    std::thread::spawn(move || accept_loop(listener, tx, ctx));
+    std::thread::spawn(move || accept_loop(listener, tx, ctx, token));
     rx
 }
 
-fn accept_loop(listener: TcpListener, tx: Sender<ControlRequest>, ctx: egui::Context) {
+fn accept_loop(listener: TcpListener, tx: Sender<ControlRequest>, ctx: egui::Context, token: String) {
     let open = Arc::new(AtomicUsize::new(0));
+    let token = Arc::new(token);
     for mut stream in listener.incoming().flatten() {
         if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
             open.fetch_sub(1, Ordering::SeqCst);
@@ -47,14 +64,19 @@ fn accept_loop(listener: TcpListener, tx: Sender<ControlRequest>, ctx: egui::Con
         let tx = tx.clone();
         let ctx = ctx.clone();
         let open = Arc::clone(&open);
+        let token = Arc::clone(&token);
         std::thread::spawn(move || {
-            serve(stream, &tx, &ctx);
+            serve(stream, &tx, &ctx, &token);
             open.fetch_sub(1, Ordering::SeqCst);
         });
     }
 }
 
-fn serve(stream: TcpStream, tx: &Sender<ControlRequest>, ctx: &egui::Context) {
+fn serve(mut stream: TcpStream, tx: &Sender<ControlRequest>, ctx: &egui::Context, token: &str) {
+    if !authenticate(&mut stream, token) {
+        return;
+    }
+    let _ = stream.set_read_timeout(None);
     let Ok(read) = stream.try_clone() else { return };
     serve_lines(read, stream, |method, params| {
         let (req, rrx) = ControlRequest::new(method, params);
@@ -62,6 +84,38 @@ fn serve(stream: TcpStream, tx: &Sender<ControlRequest>, ctx: &egui::Context) {
         ctx.request_repaint();
         Some(rrx.recv_timeout(Duration::from_secs(60)).unwrap_or_else(|_| json!({"ok": false, "error": "timeout"})))
     });
+}
+
+fn authenticate(stream: &mut TcpStream, expected: &str) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut line = Vec::new();
+    let mut complete = false;
+    while line.len() < 1024 {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() || stream.set_read_timeout(Some(remaining)).is_err() {
+            return false;
+        }
+        let mut byte = [0];
+        if stream.read_exact(&mut byte).is_err() {
+            return false;
+        }
+        if byte[0] == b'\n' {
+            complete = true;
+            break;
+        }
+        line.push(byte[0]);
+    }
+    let request: Value = serde_json::from_slice(&line).unwrap_or(Value::Null);
+    let id = request.get("id").cloned().unwrap_or(Value::Null);
+    let supplied = request.get("params").and_then(|params| params.get("token")).and_then(Value::as_str).unwrap_or("");
+    let valid =
+        complete && request.get("method").and_then(Value::as_str) == Some("auth") && effectcraft_automation::security::token_matches(expected, supplied);
+    if !valid {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let response =
+        if valid { json!({"id":id,"ok":true,"result":{"authenticated":true}}) } else { json!({"id":id,"ok":false,"error":"authentication required"}) };
+    writeln!(stream, "{response}").is_ok() && valid
 }
 
 /// One parsed line.
@@ -154,6 +208,56 @@ fn serve_lines<R: Read, W: Write>(read: R, mut out: W, mut handle: impl FnMut(St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn auth_exchange(first: Value, command: bool) -> (Value, bool) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            if !authenticate(&mut stream, &"a".repeat(64)) {
+                return false;
+            }
+            let read = stream.try_clone().unwrap();
+            let mut called = false;
+            serve_lines(read, stream, |_, _| {
+                called = true;
+                Some(json!({"ok": true}))
+            });
+            called
+        });
+        let mut client = TcpStream::connect(addr).unwrap();
+        writeln!(client, "{first}").unwrap();
+        let mut reader = BufReader::new(client.try_clone().unwrap());
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        let response = serde_json::from_str(&line).unwrap();
+        if command {
+            writeln!(client, "{}", json!({"method":"engine.execute","params":{"command":"file.save"}})).unwrap();
+            client.shutdown(std::net::Shutdown::Write).unwrap();
+        }
+        (response, worker.join().unwrap())
+    }
+
+    #[test]
+    fn unauthenticated_command_never_dispatches() {
+        let (reply, called) = auth_exchange(json!({"method":"engine.execute","params":{"command":"file.save"}}), false);
+        assert_eq!(reply["ok"], false);
+        assert!(!called);
+    }
+
+    #[test]
+    fn wrong_token_is_rejected() {
+        let (reply, called) = auth_exchange(json!({"method":"auth","params":{"token":"b".repeat(64)}}), false);
+        assert_eq!(reply["ok"], false);
+        assert!(!called);
+    }
+
+    #[test]
+    fn correct_token_permits_dispatch() {
+        let (reply, called) = auth_exchange(json!({"method":"auth","params":{"token":"a".repeat(64)}}), true);
+        assert_eq!(reply["result"]["authenticated"], true);
+        assert!(called);
+    }
 
     fn run(input: &[u8]) -> (Vec<Value>, Vec<String>) {
         let mut out = Vec::new();
@@ -261,7 +365,7 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let addr = listener.local_addr().unwrap();
         let (tx, _rx) = channel::<ControlRequest>();
-        std::thread::spawn(move || accept_loop(listener, tx, egui::Context::default()));
+        std::thread::spawn(move || accept_loop(listener, tx, egui::Context::default(), "a".repeat(64)));
         // Idle connections are accepted in order and held open.
         let held: Vec<TcpStream> = (0..16).map(|_| TcpStream::connect(addr).unwrap()).collect();
         let mut extra = TcpStream::connect(addr).unwrap();

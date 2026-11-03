@@ -36,7 +36,8 @@
 //! Saving:   --save (back to --project) | --save-as F.ecproj
 //! GPU:      --gpu renders on the GPU compositor (Mercury GPU Acceleration) when an adapter exists;
 //!           the default is the CPU (Mercury Software Only)
-//! Bridge:   --bridge PORT drives a running `effectcraft --control PORT` instead of a headless session
+//! Bridge:   --bridge PORT drives a running `effectcraft --control PORT` instead of a headless session;
+//!           set EFFECTCRAFT_CONTROL_TOKEN or EFFECTCRAFT_CONTROL_TOKEN_FILE for authentication.
 //! Output:   --json for one compact JSON document on stdout (errors: {"error": …}, exit 1)
 //! ```
 //!
@@ -137,6 +138,7 @@ const USAGE: &str = "usage: effectcraft-cli <info|commands|exec|run|props|get|se
                                            confine the agent's file access: reads under a read or write root,
                                            writes under a write root (each repeatable); scripts are refused
 options: --project F.ecproj | --demo | --empty   --save | --save-as F   --bridge PORT   --json   --gpu
+         --bridge requires EFFECTCRAFT_CONTROL_TOKEN or EFFECTCRAFT_CONTROL_TOKEN_FILE
 <comp>: id or name, '-' = active comp; <layer>: id, '#n' or name; <value>: JSON or bare string";
 
 /// Options that take a value.

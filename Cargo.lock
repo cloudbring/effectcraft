@@ -1416,6 +1416,7 @@ version = "0.21.0"
 dependencies = [
  "cpal",
  "craft-update",
+ "effectcraft-automation",
  "effectcraft-engine",
  "effectcraft-host",
  "effectcraft-ui-egui",
@@ -1444,8 +1445,10 @@ dependencies = [
  "effectcraft-host",
  "effectcraft-model",
  "effectcraft-script",
+ "getrandom 0.3.4",
  "image",
  "serde_json",
+ "subtle",
  "thiserror 2.0.21",
 ]
 

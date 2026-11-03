@@ -23,12 +23,19 @@ unknown option prints an error and the app exits with status 1 before it opens a
   the server closes the connection, so nothing sent after it runs. An HTTP request (for example a web
   page's cross-origin `fetch` to `127.0.0.1:<port>`) therefore can't smuggle a command in its body: its
   request line is rejected first. At most 16 connections are served at once; further ones get an error
-  line and are closed. The port has no authentication, so only enable it while you use it.
+  line and are closed.
+
+- **Authentication:** each launch generates a fresh 256-bit token. The first line on every connection must be
+  `{"id":0,"method":"auth","params":{"token":"TOKEN"}}`; commands are accepted only after a successful reply.
+  The token is printed to stderr, or written to a newly created private (0600 on Unix) file when
+  `EFFECTCRAFT_CONTROL_TOKEN_FILE` is set before launch. The file is never overwritten; remove it before restarting.
+  Bridge clients read that same variable or `EFFECTCRAFT_CONTROL_TOKEN` (set only one). Protect the token like a password;
+  any holder can control the app. Failed authentication is delayed and the connection closed.
 
 Quick test:
 
 ```sh
-printf '{"id":1,"method":"engine.execute","params":{"command":"comp.new","params":{"name":"A"}}}\n' | nc 127.0.0.1 9877
+printf '{"id":0,"method":"auth","params":{"token":"%s"}}\n{"id":1,"method":"engine.execute","params":{"command":"comp.new","params":{"name":"A"}}}\n' "$EFFECTCRAFT_CONTROL_TOKEN" | nc 127.0.0.1 9877
 ```
 
 ## Engine

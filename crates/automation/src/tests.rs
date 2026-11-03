@@ -486,6 +486,23 @@ fn autosave_flushes_on_read_errors_and_broken_output() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+fn authenticate_fake_app(stream: &mut std::net::TcpStream) {
+    use std::io::Read;
+    let mut line = Vec::new();
+    loop {
+        let mut byte = [0];
+        stream.read_exact(&mut byte).unwrap();
+        if byte[0] == b'\n' {
+            break;
+        }
+        line.push(byte[0]);
+    }
+    let request: Value = serde_json::from_slice(&line).unwrap();
+    assert_eq!(request["method"], "auth");
+    assert_eq!(request["params"]["token"], "a".repeat(64));
+    writeln!(stream, "{}", json!({"id": request["id"], "ok": true, "result": {"authenticated": true}})).unwrap();
+}
+
 fn fake_render_frame(session: &Session, params: &Value) -> Value {
     let png = crate::encode_png(4, 2, vec![255; 32], 0).unwrap();
     if params["write"] == true {
@@ -507,7 +524,8 @@ fn fake_app() -> u16 {
     let l = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = l.local_addr().unwrap().port();
     std::thread::spawn(move || {
-        let (stream, _) = l.accept().unwrap();
+        let (mut stream, _) = l.accept().unwrap();
+        authenticate_fake_app(&mut stream);
         let mut out = stream.try_clone().unwrap();
         let mut session = Session::default();
         for line in BufReader::new(stream).lines() {
@@ -578,7 +596,8 @@ fn lost_reply_server(first_reply: Option<&'static str>) -> (String, std::thread:
         let mut session = Session::default();
         let mut mutations = 0;
         for attempt in 0..2 {
-            let (stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = listener.accept().unwrap();
+            authenticate_fake_app(&mut stream);
             stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
             let mut output = stream.try_clone().unwrap();
             let mut input = String::new();
@@ -679,7 +698,8 @@ fn bridge_connect_failure_can_be_retried_when_the_app_starts() {
     assert!(!error.to_string().contains("outcome is unknown"), "nothing was sent");
     let listener = TcpListener::bind(addr).unwrap();
     let worker = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = listener.accept().unwrap();
+        authenticate_fake_app(&mut stream);
         stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
         let mut output = stream.try_clone().unwrap();
         let mut input = String::new();
@@ -1696,7 +1716,8 @@ fn bridged_render_frame_asks_the_app_before_it_writes() {
     let l = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = l.local_addr().unwrap().port();
     std::thread::spawn(move || {
-        let (stream, _) = l.accept().unwrap();
+        let (mut stream, _) = l.accept().unwrap();
+        authenticate_fake_app(&mut stream);
         let mut out = stream.try_clone().unwrap();
         let mut session = Session { importer: Some(std::sync::Arc::new(Probe)), ..Default::default() };
         for line in BufReader::new(stream).lines() {

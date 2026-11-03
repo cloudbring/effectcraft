@@ -10,7 +10,7 @@ limits. This guard does not change ordinary-file overwrite defaults or add anoth
 
 | Interface | Best for | Needs a window |
 |---|---|---|
-| **MCP** (`effectcraft-cli mcp`) | Claude Code and other MCP clients | no (headless), or yes with `--bridge` |
+| **MCP** (`effectcraft-cli mcp`) | Claude Code and other MCP clients | no (headless), or yes with `--bridge` (requires `EFFECTCRAFT_CONTROL_TOKEN` or `EFFECTCRAFT_CONTROL_TOKEN_FILE`; see [control protocol](control-protocol.md)) |
 | **CLI** (`effectcraft-cli exec/get/set/...`) | one-shot scripting and CI; JSON output with `--json` | no |
 | **Control channel** (`effectcraft --control 9877`) | driving and seeing the live UI; see [control-protocol.md](control-protocol.md) | yes |
 
