@@ -322,6 +322,11 @@ struct SpatialSeg {
 }
 
 const ARC_N: usize = 96;
+const SPATIAL_CACHE_SIZE: usize = 8;
+
+thread_local! {
+    static SPATIAL_SEGS: RefCell<VecDeque<SpatialSeg>> = const { RefCell::new(VecDeque::new()) };
+}
 
 /// 5-point Gauss-Legendre nodes and weights on -1..1.
 const GAUSS: [(f64, f64); 5] = [
@@ -333,6 +338,25 @@ const GAUSS: [(f64, f64); 5] = [
 ];
 
 impl SpatialSeg {
+    fn cached(p: [[f64; 3]; 4]) -> SpatialSeg {
+        if !p.iter().flatten().all(|v| v.is_finite()) {
+            return Self::new(p);
+        }
+        SPATIAL_SEGS.with_borrow_mut(|cache| {
+            if let Some(seg) = cache
+                .iter()
+                .position(|seg| seg.p.iter().flatten().zip(p.iter().flatten()).all(|(left, right)| left.to_bits() == right.to_bits()))
+                .and_then(|index| cache.remove(index))
+            {
+                cache.push_front(SpatialSeg { p: seg.p, table: seg.table.clone() });
+                return seg;
+            }
+            let seg = Self::new(p);
+            cache.push_front(SpatialSeg { p, table: seg.table.clone() });
+            cache.truncate(SPATIAL_CACHE_SIZE);
+            seg
+        })
+    }
     fn new(p: [[f64; 3]; 4]) -> SpatialSeg {
         let mut table = Vec::with_capacity(ARC_N + 1);
         table.push(0.0);
@@ -509,7 +533,7 @@ pub fn spatial_segment_length(keys: &[Keyframe], i: usize) -> f64 {
     let p3 = v3(&b.value);
     let (_, out_t) = spatial_tangents(keys, i);
     let (in_t, _) = spatial_tangents(keys, next);
-    SpatialSeg::new([p0, [p0[0] + out_t[0], p0[1] + out_t[1], p0[2] + out_t[2]], [p3[0] + in_t[0], p3[1] + in_t[1], p3[2] + in_t[2]], p3]).length()
+    SpatialSeg::cached([p0, [p0[0] + out_t[0], p0[1] + out_t[1], p0[2] + out_t[2]], [p3[0] + in_t[0], p3[1] + in_t[1], p3[2] + in_t[2]], p3]).length()
 }
 
 /// Re-time roving keyframes: each run of roving keys between two fixed (non-roving) keys gets
@@ -638,7 +662,7 @@ fn segment_value_of<K: Borrow<Keyframe>>(keys: &[K], i: usize, t: Tick, spatial:
         let p3 = v3(&b.value);
         let (_, out_t) = tangents_of(keys, i);
         let (in_t, _) = tangents_of(keys, i + 1);
-        let seg = SpatialSeg::new([p0, [p0[0] + out_t[0], p0[1] + out_t[1], p0[2] + out_t[2]], [p3[0] + in_t[0], p3[1] + in_t[1], p3[2] + in_t[2]], p3]);
+        let seg = SpatialSeg::cached([p0, [p0[0] + out_t[0], p0[1] + out_t[1], p0[2] + out_t[2]], [p3[0] + in_t[0], p3[1] + in_t[1], p3[2] + in_t[2]], p3]);
         let len = seg.length();
         let f = if lin_out && lin_in || len <= 1e-12 {
             x

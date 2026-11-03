@@ -502,3 +502,19 @@ fn mute_round_trips_and_survives_value_replacement() {
     assert!(keys[0].muted);
     assert_eq!(keys[0].value, Value::Scalar(2.0));
 }
+
+#[test]
+fn spatial_table_cache_matches_fresh_and_invalidates_on_control_point_edits() {
+    let mut points = [[0.0, 0.0, 0.0], [20.0, 40.0, 0.0], [80.0, -30.0, 0.0], [100.0, 0.0, 0.0]];
+    for index in 0..20 {
+        points[1][1] = index as f64 * 2.0;
+        let fresh = SpatialSeg::new(points);
+        let cached = SpatialSeg::cached(points);
+        assert_eq!(cached.table, fresh.table);
+        for fraction in [0.0, 0.1, 0.5, 0.9, 1.0] {
+            assert_eq!(cached.at_length(cached.length() * fraction), fresh.at_length(fresh.length() * fraction));
+        }
+        assert_eq!(SpatialSeg::cached(points).table, fresh.table);
+        assert!(cached.table.windows(2).all(|pair| pair[0] <= pair[1]));
+    }
+}
