@@ -343,12 +343,13 @@ fn audio_effects_draw_with_host() {
 #[test]
 fn fft_finds_tone() {
     let n = 256;
-    let mut re: Vec<f64> = (0..n).map(|i| (2.0 * PI * 8.0 * i as f64 / n as f64).cos()).collect();
-    let mut im = vec![0.0; n];
-    fft(&mut re, &mut im);
-    let mags: Vec<f64> = (0..n / 2).map(|k| (re[k] * re[k] + im[k] * im[k]).sqrt()).collect();
-    let peak = mags.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).unwrap().0;
-    assert_eq!(peak, 8);
+    let samples: Vec<f64> = (0..n).map(|i| (2.0 * PI * 8.0 * i as f64 / n as f64).cos()).collect();
+    audio::compute_fft_mags(&samples, |_, mags| {
+        let (peak, amplitude) = mags.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).unwrap();
+        assert_eq!(peak, 8);
+        assert!((amplitude - 1.0).abs() < 0.01);
+    })
+    .unwrap();
 }
 
 #[test]

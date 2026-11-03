@@ -25,8 +25,6 @@ mod paths;
 mod raster;
 mod registry;
 
-#[cfg(test)]
-pub(crate) use audio::fft;
 pub use audio::{MarksPlan, marks_plan};
 pub use fill::{eyedropper_color, paint_bucket_region};
 #[cfg(test)]

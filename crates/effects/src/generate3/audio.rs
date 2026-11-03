@@ -1,58 +1,57 @@
 use super::raster::{Seg, mask_px, over, poly_segs, raster_segs};
 use super::{Buf, EffectCtx, IndexedParallelIterator, IntoParallelRefMutIterator, PI, ParallelIterator, poly_length, premul};
+use craft_fft::{Complex, ComplexFft, Direction, Error};
+use std::sync::Mutex;
 
 // ---------------------------------------------------------------- Audio Spectrum / Waveform
 
-/// In-place iterative radix-2 FFT (`re`, `im` lengths a power of two).
-pub(crate) fn fft(re: &mut [f64], im: &mut [f64]) {
-    let n = re.len();
-    if n < 2 {
-        return;
-    }
-    let mut j = 0;
-    for i in 1..n {
-        let mut bit = n >> 1;
-        while j & bit != 0 {
-            j ^= bit;
-            bit >>= 1;
-        }
-        j |= bit;
-        if i < j {
-            re.swap(i, j);
-            im.swap(i, j);
-        }
-    }
-    let mut len = 2;
-    while len <= n {
-        let ang = -2.0 * PI / len as f64;
-        let (ws, wc) = ang.sin_cos();
-        for start in (0..n).step_by(len) {
-            let (mut cr, mut ci) = (1.0, 0.0);
-            for k in 0..len / 2 {
-                let (a, bb) = (start + k, start + k + len / 2);
-                let tr = re[bb] * cr - im[bb] * ci;
-                let ti = re[bb] * ci + im[bb] * cr;
-                re[bb] = re[a] - tr;
-                im[bb] = im[a] - ti;
-                re[a] += tr;
-                im[a] += ti;
-                let ncr = cr * wc - ci * ws;
-                ci = cr * ws + ci * wc;
-                cr = ncr;
-            }
-        }
-        len <<= 1;
-    }
+const AUDIO_RATE: u32 = 48_000;
+const MAX_AUDIO_FRAMES: usize = 1 << 16;
+
+/// One plan, interleaved buffer and magnitude buffer per supported size (64..=65536).
+/// A size's first use allocates; later analysis does not, even when durations alternate.
+/// Per-size locks bound total cache memory and also serve concurrent render workers.
+static FFT_PLANS: [Mutex<Option<SpectrumFft>>; 11] = [const { Mutex::new(None) }; 11];
+
+struct SpectrumFft {
+    plan: ComplexFft<f64>,
+    buffer: Vec<Complex<f64>>,
+    magnitudes: Vec<f64>,
 }
 
-const AUDIO_RATE: u32 = 48_000;
+impl SpectrumFft {
+    fn new(length: usize) -> Result<Self, Error> {
+        if !(64..=MAX_AUDIO_FRAMES).contains(&length) || !length.is_power_of_two() {
+            return Err(Error::InvalidSize);
+        }
+        Ok(Self { plan: ComplexFft::new(length)?, buffer: vec![Complex::new(0.0, 0.0); length], magnitudes: vec![0.0; length / 2 + 1] })
+    }
+
+    fn analyze(&mut self, samples: &[f64]) -> Result<&[f64], Error> {
+        if samples.len() > self.buffer.len() {
+            return Err(Error::Length { expected: self.buffer.len(), actual: samples.len() });
+        }
+        self.buffer.fill(Complex::new(0.0, 0.0));
+        let denom = (samples.len().max(2) - 1) as f64;
+        for (index, (value, sample)) in self.buffer.iter_mut().zip(samples).enumerate() {
+            let window = 0.5 - 0.5 * (2.0 * PI * index as f64 / denom).cos();
+            value.re = sample * window;
+        }
+        self.plan.process_in_place(Direction::Forward, &mut self.buffer)?;
+        let scale = 4.0 / samples.len().max(1) as f64;
+        for (magnitude, value) in self.magnitudes.iter_mut().zip(&self.buffer) {
+            *magnitude = (value.re * value.re + value.im * value.im).sqrt() * scale;
+        }
+        Ok(&self.magnitudes)
+    }
+}
 
 /// Fetch mono (or one channel) samples of the audio layer around the current time.
 fn audio_window(ctx: &EffectCtx, dur_ms: f64, offset_ms: f64, channel: u32) -> Option<Vec<f64>> {
     let id = ctx.params.get("audioLayer")?.as_layer()?;
     let host = ctx.env.host?;
     let dur = (dur_ms / 1000.0).max(0.001);
-    let frames = ((dur * AUDIO_RATE as f64) as usize).clamp(16, 1 << 16);
+    let frames = ((dur * AUDIO_RATE as f64) as usize).clamp(16, MAX_AUDIO_FRAMES);
     let start = ctx.env.comp_time + offset_ms / 1000.0 - dur * 0.5;
     let s = host.audio(id, start, frames, AUDIO_RATE)?;
     Some(
@@ -176,37 +175,35 @@ pub(super) fn audio_waveform(ctx: &EffectCtx, mut b: Buf) -> Buf {
     b
 }
 
-fn compute_fft_mags(samples: &[f64]) -> (usize, f64, Vec<f64>) {
-    let m = samples.len();
-    let n = m.next_power_of_two().max(64);
-    let mut re = vec![0.0; n];
-    let mut im = vec![0.0; n];
-    let denom = (m.max(2) - 1) as f64;
-    for (i, s) in samples.iter().enumerate() {
-        let w = 0.5 - 0.5 * (2.0 * PI * i as f64 / denom).cos();
-        if let Some(r) = re.get_mut(i) {
-            *r = s * w;
-        }
+pub(super) fn compute_fft_mags<T>(samples: &[f64], consume: impl FnOnce(f64, &[f64]) -> T) -> Result<T, Error> {
+    if samples.len() > MAX_AUDIO_FRAMES {
+        return Err(Error::InvalidSize);
     }
-    fft(&mut re, &mut im);
-    let hz_per_bin = AUDIO_RATE as f64 / n as f64;
-    let scale = 4.0 / m.max(1) as f64;
-    let num_bins = n / 2 + 1;
-    let mut mags = Vec::with_capacity(num_bins);
-    for k in 0..num_bins {
-        let r = re.get(k).copied().unwrap_or(0.0);
-        let im_val = im.get(k).copied().unwrap_or(0.0);
-        let mag = (r * r + im_val * im_val).sqrt() * scale;
-        mags.push(mag);
+    let length = samples.len().next_power_of_two().max(64);
+    let slot = FFT_PLANS.get((length.ilog2() - 6) as usize).ok_or(Error::InvalidSize)?;
+    let mut entry = slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if entry.is_none() {
+        *entry = Some(SpectrumFft::new(length)?);
     }
-    (n, hz_per_bin, mags)
+    let fft = entry.as_mut().ok_or(Error::InvalidSize)?;
+    let magnitudes = fft.analyze(samples)?;
+    Ok(consume(AUDIO_RATE as f64 / length as f64, magnitudes))
 }
 
 fn spectrum_plan(ctx: &EffectCtx, b: &Buf) -> Option<MarksPlan> {
     let pr = ctx.params;
     let samples = audio_window(ctx, pr.f("audioDuration"), pr.f("audioOffset"), 0)?;
-    let (_n, hz_per_bin, mags) = compute_fft_mags(&samples);
+    match compute_fft_mags(&samples, |hz_per_bin, mags| spectrum_marks(ctx, b, hz_per_bin, mags)) {
+        Ok(plan) => Some(plan),
+        Err(error) => {
+            log::warn!("Audio Spectrum analysis failed: {error}");
+            None
+        }
+    }
+}
 
+fn spectrum_marks(ctx: &EffectCtx, b: &Buf, hz_per_bin: f64, mags: &[f64]) -> MarksPlan {
+    let pr = ctx.params;
     let bands = pr.f("frequencyBands").round().clamp(1.0, 4096.0) as usize;
     let f0 = pr.f("startFrequency").max(0.0);
     let f1 = pr.f("endFrequency").max(f0 + 1.0);
@@ -266,7 +263,7 @@ fn spectrum_plan(ctx: &EffectCtx, b: &Buf) -> Option<MarksPlan> {
             }
         }
     }
-    Some(marks(ctx, segs, thick, soft))
+    marks(ctx, segs, thick, soft)
 }
 
 fn waveform_plan(ctx: &EffectCtx, b: &Buf) -> Option<MarksPlan> {
@@ -312,3 +309,7 @@ fn waveform_plan(ctx: &EffectCtx, b: &Buf) -> Option<MarksPlan> {
     }
     Some(marks(ctx, segs, thick, soft))
 }
+
+#[cfg(test)]
+#[path = "audio_tests.rs"]
+mod tests;

@@ -409,6 +409,57 @@ fn plan_effects_golden_hashes() {
     }
 }
 
+#[test]
+#[ignore = "manual before/after audio pixel comparison and release benchmark"]
+fn audio_fft_migration_measurements() {
+    let baseline = std::env::var("AUDIO_FFT_BASELINE").expect("set AUDIO_FFT_BASELINE to a snapshot file");
+    let mut pixels = Vec::new();
+    let mut frames = 0;
+    for (id, sets) in cases().into_iter().filter(|(id, _)| id.starts_with("ec.generate.audio")) {
+        for set in sets {
+            for (bpc8, half) in [(true, false), (false, false), (false, true)] {
+                for time in TIMES {
+                    pixels.extend(render(id, &set, time, bpc8, half).data.into_iter().flatten());
+                    frames += 1;
+                }
+            }
+        }
+    }
+    if std::env::var_os("AUDIO_FFT_CAPTURE").is_some() {
+        let bytes: Vec<u8> = pixels.iter().flat_map(|value| value.to_le_bytes()).collect();
+        std::fs::write(baseline, bytes).unwrap();
+    } else {
+        let bytes = std::fs::read(baseline).unwrap();
+        assert_eq!(bytes.len(), pixels.len() * 4);
+        let mut max_delta = 0.0f32;
+        let mut changed = 0;
+        for (actual, expected) in pixels.iter().zip(bytes.as_chunks::<4>().0) {
+            let expected = f32::from_le_bytes(*expected);
+            assert!(actual.is_finite() && expected.is_finite());
+            max_delta = max_delta.max((actual - expected).abs());
+            changed += usize::from(actual.to_bits() != expected.to_bits());
+        }
+        println!("audio pixels: {frames} frames, {} components, {changed} changed, max delta {max_delta:e}", pixels.len());
+        assert!(max_delta <= 1e-6, "audio pixel delta {max_delta:e}");
+    }
+    for duration in [170.0, 1365.0] {
+        let set = vec![("audioLayer", Value::Layer(Some(MAP))), ("audioDuration", n(duration))];
+        for _ in 0..8 {
+            std::hint::black_box(render("ec.generate.audiospectrum", &set, 0.4, false, false));
+        }
+        let mut timings = Vec::new();
+        for _ in 0..21 {
+            let start = std::time::Instant::now();
+            for _ in 0..32 {
+                std::hint::black_box(render("ec.generate.audiospectrum", &set, 0.4, false, false));
+            }
+            timings.push(start.elapsed().as_secs_f64() * 1e6 / 32.0);
+        }
+        timings.sort_by(f64::total_cmp);
+        println!("spectrum frame: {W}x{H}, duration {duration} ms, median {:.3} us/frame (21 batches of 32)", timings[10]);
+    }
+}
+
 /// Pinned hashes (aarch64 macOS).
 const GOLDEN: &[(&str, u64)] = &[
     ("ec.obsolete.lightning/0/8bpc/t0.4", 0xd829bb3a79ec2d61),

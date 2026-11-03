@@ -2,7 +2,13 @@
 //! with FilmCraft's spec-derived decoder, delay-searched SNR and an Ogg Opus writer for ffmpeg.
 #![allow(dead_code)]
 
+use craft_fft::{Direction, RealFft};
 use effectcraft_opusenc::OpusEncoder;
+use std::{cell::RefCell, collections::BTreeMap};
+
+thread_local! {
+    static LOWPASS_PLANS: RefCell<BTreeMap<usize, RealFft<f64>>> = const { RefCell::new(BTreeMap::new()) };
+}
 
 pub const SR: f64 = 48_000.0;
 pub const FRAME: usize = OpusEncoder::FRAME_SIZE;
@@ -185,53 +191,36 @@ pub fn bitrate(packets: &[Vec<u8>]) -> f64 {
 /// Low-pass filtered copy (FFT brick wall) used to compare band-limited modes fairly.
 pub fn lowpass(x: &[f32], fc: f64) -> Vec<f32> {
     let n = x.len().next_power_of_two();
-    let mut re: Vec<f64> = x.iter().map(|&v| v as f64).collect();
-    re.resize(n, 0.0);
-    let mut im = vec![0f64; n];
-    fft(&mut re, &mut im, false);
-    for k in 0..n {
-        let f = (k.min(n - k)) as f64 * SR / n as f64;
-        if f > fc {
-            re[k] = 0.0;
-            im[k] = 0.0;
+    LOWPASS_PLANS.with_borrow_mut(|plans| {
+        let plan = plans.entry(n).or_insert_with(|| RealFft::new(n).unwrap());
+        plan.time_mut().fill(0.0);
+        for (value, sample) in plan.time_mut().iter_mut().zip(x) {
+            *value = *sample as f64;
         }
-    }
-    fft(&mut re, &mut im, true);
-    re[..x.len()].iter().map(|&v| (v / n as f64) as f32).collect()
-}
-
-pub fn fft(re: &mut [f64], im: &mut [f64], inverse: bool) {
-    let n = re.len();
-    let mut j = 0;
-    for i in 1..n {
-        let mut bit = n >> 1;
-        while j & bit != 0 {
-            j ^= bit;
-            bit >>= 1;
-        }
-        j |= bit;
-        if i < j {
-            re.swap(i, j);
-            im.swap(i, j);
-        }
-    }
-    let mut len = 2;
-    while len <= n {
-        let ang = if inverse { 2.0 } else { -2.0 } * std::f64::consts::PI / len as f64;
-        for s in (0..n).step_by(len) {
-            for k in 0..len / 2 {
-                let (wr, wi) = ((ang * k as f64).cos(), (ang * k as f64).sin());
-                let (a, b) = (s + k, s + k + len / 2);
-                let tr = re[b] * wr - im[b] * wi;
-                let ti = re[b] * wi + im[b] * wr;
-                re[b] = re[a] - tr;
-                im[b] = im[a] - ti;
-                re[a] += tr;
-                im[a] += ti;
+        plan.process_in_place(Direction::Forward).unwrap();
+        for (bin, value) in plan.spectrum_mut().iter_mut().enumerate() {
+            if bin as f64 * SR / n as f64 > fc {
+                *value = craft_fft::Complex::new(0.0, 0.0);
             }
         }
-        len <<= 1;
+        plan.process_in_place(Direction::Inverse).unwrap();
+        plan.time().iter().take(x.len()).map(|&value| value as f32).collect()
+    })
+}
+
+#[test]
+fn lowpass_fft_preserves_normalization_and_clears_cached_padding() {
+    for length in [0, 1, 63, 64, 65, 256, 255, 8192] {
+        let input: Vec<f32> = (0..length).map(|index| (index * 17 % 101) as f32 / 50.0 - 1.0).collect();
+        let output = lowpass(&input, SR * 0.5);
+        assert_eq!(output.len(), input.len());
+        for (actual, expected) in output.iter().zip(&input) {
+            assert!((actual - expected).abs() < 1e-6);
+        }
+        assert!(lowpass(&vec![0.0; length], SR * 0.5).iter().all(|&value| value == 0.0));
     }
+    let input: Vec<f32> = (0..256).map(|index| 0.25 + (std::f64::consts::TAU * 8.0 * index as f64 / 256.0).cos() as f32).collect();
+    assert!(lowpass(&input, 0.0).iter().all(|&value| (value - 0.25).abs() < 1e-6));
 }
 
 // ---- Ogg Opus (RFC 3533 + RFC 7845) for the ffmpeg oracle ----

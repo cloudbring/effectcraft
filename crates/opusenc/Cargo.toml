@@ -12,4 +12,5 @@ workspace = true
 [dependencies]
 
 [dev-dependencies]
+craft-fft = { workspace = true }
 filmcraft-opus = { workspace = true }

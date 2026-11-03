@@ -1,12 +1,18 @@
 //! Round trip of `effectcraft-opusenc` through FilmCraft's spec-derived Opus decoder, plus an
 //! ffmpeg oracle (skipped when ffmpeg is not installed) reading an Ogg Opus file written here.
 
+use craft_fft::{Direction, RealFft};
+use std::cell::RefCell;
 use std::process::Command;
 
 use effectcraft_opusenc::OpusEncoder;
 
 const SR: f32 = 48_000.0;
 const FRAME: usize = OpusEncoder::FRAME_SIZE;
+
+thread_local! {
+    static BAND_PLAN: RefCell<RealFft<f64>> = RefCell::new(RealFft::new(2048).unwrap());
+}
 
 /// Encodes interleaved `pcm`, padding the tail so the encoder's look-ahead is flushed.
 fn encode(pcm: &[f32], channels: u8, bitrate: u32) -> (OpusEncoder, Vec<Vec<u8>>) {
@@ -95,54 +101,32 @@ fn band_energies(x: &[f32]) -> Vec<f64> {
     const N: usize = 2048;
     let edges = [100.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0];
     let mut acc = vec![0f64; edges.len() - 1];
-    let mut start = N;
-    while start + N <= x.len() - N {
-        let mut re: Vec<f64> = (0..N).map(|i| x[start + i] as f64 * (0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / N as f64).cos())).collect();
-        let mut im = vec![0f64; N];
-        fft(&mut re, &mut im);
-        for k in 1..N / 2 {
-            let f = k as f64 * SR as f64 / N as f64;
-            if let Some(b) = edges.windows(2).position(|w| f >= w[0] && f < w[1]) {
-                acc[b] += re[k] * re[k] + im[k] * im[k];
+    BAND_PLAN.with_borrow_mut(|plan| {
+        let mut start = N;
+        while start + N <= x.len() - N {
+            for (index, value) in plan.time_mut().iter_mut().enumerate() {
+                *value = x[start + index] as f64 * (0.5 - 0.5 * (2.0 * std::f64::consts::PI * index as f64 / N as f64).cos());
             }
+            plan.process_in_place(Direction::Forward).unwrap();
+            for (bin, value) in plan.spectrum().iter().enumerate().take(N / 2).skip(1) {
+                let frequency = bin as f64 * SR as f64 / N as f64;
+                if let Some(band) = edges.windows(2).position(|edges| frequency >= edges[0] && frequency < edges[1]) {
+                    acc[band] += value.norm_sqr();
+                }
+            }
+            start += N;
         }
-        start += N;
-    }
+    });
     acc.iter().map(|e| 10.0 * (e + 1e-20).log10()).collect()
 }
 
-fn fft(re: &mut [f64], im: &mut [f64]) {
-    let n = re.len();
-    let mut j = 0;
-    for i in 1..n {
-        let mut bit = n >> 1;
-        while j & bit != 0 {
-            j ^= bit;
-            bit >>= 1;
-        }
-        j |= bit;
-        if i < j {
-            re.swap(i, j);
-            im.swap(i, j);
-        }
-    }
-    let mut len = 2;
-    while len <= n {
-        let ang = -2.0 * std::f64::consts::PI / len as f64;
-        for s in (0..n).step_by(len) {
-            for k in 0..len / 2 {
-                let (wr, wi) = ((ang * k as f64).cos(), (ang * k as f64).sin());
-                let (a, b) = (s + k, s + k + len / 2);
-                let tr = re[b] * wr - im[b] * wi;
-                let ti = re[b] * wi + im[b] * wr;
-                re[b] = re[a] - tr;
-                im[b] = im[a] - ti;
-                re[a] += tr;
-                im[a] += ti;
-            }
-        }
-        len <<= 1;
-    }
+#[test]
+fn band_fft_retains_unscaled_forward_energy() {
+    let input: Vec<f32> = (0..8192).map(|index| (std::f64::consts::TAU * 16.0 * index as f64 / 2048.0).cos() as f32).collect();
+    let energies = band_energies(&input);
+    let expected = 10.0 * (2.0f64 * 2048.0f64.powi(2) * 3.0 / 32.0).log10();
+    assert!((energies[1] - expected).abs() < 1e-6, "{} != {expected}", energies[1]);
+    assert!(band_energies(&[0.0; 8192]).iter().all(|&value| value == -200.0));
 }
 
 #[test]

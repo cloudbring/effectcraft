@@ -53,6 +53,45 @@ intermediate image.
 
 ## Benchmarks
 
+### Audio FFT migration (#1)
+
+`generate3/audio.rs` uses cached f64 `craft-fft` complex plans for the eleven powers of two
+from 64 through 65536. Forward transforms remain unscaled; the Hann window, zero padding,
+`4/sample_count` magnitude scaling and band interpolation are unchanged. The shared backend's
+inverse convention is `1/N`; the Opus test-only low-pass helper now consumes that normalized
+inverse directly, without dividing a second time. Opus encoder MDCT is unchanged (#49).
+Plans, backend scratch, complex samples and magnitudes are retained per size. Allocation tests
+cover the first analysis after planning and warm cache lookups with alternating sizes. This
+does not claim the entire effect is allocation-free: host audio, mark geometry and raster
+buffers still allocate as before. Per-size locks serialize concurrent analysis of the same
+size without locking rasterization, and cap the cache at eleven entries.
+
+For a before/after comparison, run the ignored `gen_golden::audio_fft_migration_measurements`
+integration test once before changing the implementation with `AUDIO_FFT_CAPTURE=1` and
+`AUDIO_FFT_BASELINE=/absolute/path/audio-before.bin`, then again afterwards with the same
+baseline path and without the capture flag. It compares every component of the 36 existing
+Audio Spectrum/Waveform golden frames at two times, three parameter sets and three depth/scale
+configurations, and asserts a maximum absolute delta of `1e-6`. The existing exact-hash test
+remains enabled; do not use capture mode to replace its pins.
+
+```sh
+CARGO_TARGET_DIR="$PWD/target-1" CARGO_INCREMENTAL=0 \
+  CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
+  CARGO_PROFILE_RELEASE_DEBUG=0 RAYON_NUM_THREADS=1 \
+  AUDIO_FFT_BASELINE="$PWD/target-1/audio-before.bin" \
+  cargo test -p effectcraft-effects --release --test it audio_fft_migration_measurements -- --ignored --nocapture
+```
+
+Measured on aarch64 macOS, November 3, 2026: all 349,632 f32 components were bit-identical
+(maximum delta zero; no golden updates). Warm 64×48 Spectrum frames, including host sampling
+and CPU rasterization, took median 233.000 µs before versus 156.229–190.738 µs after at
+N=8192 (170 ms audio), and 1560.740 µs before versus 935.306–1008.016 µs after at
+N=65536 (1365 ms audio). The after ranges are two runs of the same implementation. Each
+measurement uses 21 batches of 32 frames after eight warm-up frames, with one Rayon worker
+and identical release settings. These are whole-effect measurements, not isolated FFT-kernel
+speedups. Direct-DFT checks across every supported FFT size measured a maximum Hann-magnitude
+delta of 9.68e-15; cached analysis and the first processing call after planning allocate zero times.
+
 ```sh
 cargo run --release -p effectcraft-cli -- bench --n 10 --play 30
 ```
