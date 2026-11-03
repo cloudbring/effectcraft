@@ -320,20 +320,34 @@ impl Image {
     }
     /// Blend `src` (same size) onto self with a mode and opacity.
     pub fn blend_from(&mut self, src: &Image, mode: BlendMode, opacity: f32, seed: u32) {
+        self.blend_from_region(src, mode, opacity, seed, [0, 0, self.width, self.height]);
+    }
+
+    pub fn blend_from_region(&mut self, src: &Image, mode: BlendMode, opacity: f32, seed: u32, region: [u32; 4]) {
         let w = self.width as usize;
-        self.data.par_chunks_mut(w.max(1)).zip(src.data.par_chunks(w.max(1))).enumerate().for_each(|(y, (d, s))| {
-            for x in 0..d.len() {
-                let mut sp = s[x];
-                if sp[3] <= 0.0 && !mode.is_stencil() {
-                    continue;
+        let [x0, y0, x1, y1] = region;
+        let x1 = x1.min(self.width).min(src.width) as usize;
+        let y1 = y1.min(self.height).min(src.height) as usize;
+        let x0 = (x0 as usize).min(x1);
+        let y0 = (y0 as usize).min(y1);
+        self.data.par_chunks_mut(w.max(1)).zip(src.data.par_chunks((src.width as usize).max(1))).enumerate().skip(y0).take(y1 - y0).for_each(
+            |(y, (dst, source))| {
+                let Some(dst) = dst.get_mut(x0..x1) else { return };
+                let Some(source) = source.get(x0..x1) else { return };
+                for (offset, (pixel, source_pixel)) in dst.iter_mut().zip(source).enumerate() {
+                    let mut sp = *source_pixel;
+                    if sp[3] <= 0.0 && !mode.is_stencil() {
+                        continue;
+                    }
+                    for c in sp.iter_mut() {
+                        *c *= opacity;
+                    }
+                    let n =
+                        if matches!(mode, BlendMode::Dissolve | BlendMode::DancingDissolve) { hash_noise((x0 + offset) as u32, y as u32, seed) } else { 0.5 };
+                    *pixel = blend_pixel(mode, *pixel, sp, n);
                 }
-                for c in sp.iter_mut() {
-                    *c *= opacity;
-                }
-                let n = if matches!(mode, BlendMode::Dissolve | BlendMode::DancingDissolve) { hash_noise(x as u32, y as u32, seed) } else { 0.5 };
-                d[x] = blend_pixel(mode, d[x], sp, n);
-            }
-        });
+            },
+        );
     }
     /// Bounding box of non-transparent pixels (x0, y0, x1, y1), None if empty.
     pub fn alpha_bounds(&self) -> Option<(u32, u32, u32, u32)> {
@@ -402,6 +416,40 @@ impl Mask {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_blending_matches_full_pass_bits_and_noise_coordinates() {
+        let mut source = Image::new(17, 13);
+        for row in 3..9 {
+            for column in 5..12 {
+                source.set(column, row, [0.125, 0.25, 0.375, 0.5]);
+            }
+        }
+        for mode in BlendMode::ALL.into_iter().filter(|mode| !mode.is_stencil()) {
+            let mut full = Image::filled(17, 13, [0.25, 0.125, 0.375, 0.75]);
+            let mut bounded = full.clone();
+            full.blend_from(&source, mode, 0.7, 123);
+            bounded.blend_from_region(&source, mode, 0.7, 123, [5, 3, 12, 9]);
+            for (full, bounded) in full.data.iter().flatten().zip(bounded.data.iter().flatten()) {
+                assert_eq!(full.to_bits(), bounded.to_bits(), "{mode:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_blending_clips_empty_offscreen_and_mismatched_images() {
+        let mut target = Image::filled(4, 3, [0.5; 4]);
+        let original = target.clone();
+        let source = Image::filled(2, 2, [1.0; 4]);
+        for region in [[0; 4], [u32::MAX, u32::MAX, 0, 0], [8, 8, 20, 20], [3, 2, 1, 1]] {
+            target.blend_from_region(&source, BlendMode::Normal, 1.0, 0, region);
+            assert_eq!(target, original);
+        }
+        target.blend_from_region(&source, BlendMode::Normal, 1.0, 0, [0, 0, u32::MAX, u32::MAX]);
+        assert_eq!(target.get(1, 1), [1.0; 4]);
+        assert_eq!(target.get(2, 1), [0.5; 4]);
+        Image::default().blend_from_region(&source, BlendMode::Normal, 1.0, 0, [0, 0, 1, 1]);
+    }
 
     #[test]
     fn dither_keeps_exact_codes_and_averages_the_rest() {

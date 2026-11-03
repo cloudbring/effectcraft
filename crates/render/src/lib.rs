@@ -44,6 +44,7 @@ mod fx_host;
 mod layers;
 mod opts;
 mod pipeline;
+mod scratch;
 
 pub use accel::{Accelerator, Backend, FxStep, FxTarget};
 pub use footage::{CancellableFootage, FloatCurve, FootageSource, NoFootage, is_vector_footage};
@@ -97,6 +98,7 @@ pub struct Renderer<'a> {
     through: [Option<Through<'a>>; MAX_THROUGH],
     /// More collapsed levels than [`MAX_THROUGH`]: their motion is not blurred.
     through_lost: bool,
+    scratch: Arc<scratch::BufferPool>,
 }
 
 #[cfg(test)]

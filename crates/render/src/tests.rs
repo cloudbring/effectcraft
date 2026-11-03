@@ -9,6 +9,7 @@ use crate::render_frame;
 mod audio_fx;
 mod auto;
 mod aux_channels;
+mod buffers;
 mod collapse;
 mod color;
 mod footage_size;

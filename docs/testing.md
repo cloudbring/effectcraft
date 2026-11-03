@@ -60,6 +60,68 @@ cargo run --release -p effectcraft-cli -- bench --n 10 --play 30
 prints per-layer and per-effect timings for one frame, and playback timings with and without the
 layer cache.
 
+### Compositor scratch buffers (#112)
+
+```sh
+export CARGO_TARGET_DIR="$PWD/target-112"
+export RUSTC="$(rustup which --toolchain stable rustc)"
+export RUSTDOC="$(rustup which --toolchain stable rustdoc)"
+export PATH="$(dirname "$RUSTC"):$PATH"
+rustup run stable cargo test --locked --release -p effectcraft-render \
+  compose_buffers_1080p -- --ignored --nocapture
+```
+
+The ignored benchmark renders 60 animated, uncached 1080p frames after one warmup frame,
+with eight solid layers (seven preserving transparency). It measures both full-canvas and
+480×270 layer sources. One Rayon worker runs both rendering and the thread-local
+`allocation-counter` measurement; this includes the returned image and evaluator metadata,
+not just scratch storage. `allocation-counter` is a dev-only MIT/Apache-2.0 dependency.
+
+Measured on November 3, 2026, Apple M6, release profile, Cargo 1.99.0 via rustup and
+Homebrew rustc 1.99.0 (`b940084d7`); baseline production code:
+`7870b5916ae0749d497d880989683bf2946d6c8b`. Both sides used the same compiler. The commands
+above explicitly pin rustup's compiler too, as do the final quality checks: on this machine
+`rustup run stable cargo` alone still found Homebrew rustc because the rustup rustc shim
+was absent from `~/.cargo/bin`.
+
+| Layer size | Before ms/frame | After ms/frame | Before allocations/frame | After allocations/frame | Before allocated bytes/frame | After allocated bytes/frame |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1920×1080 | 69.138 | 75.795 | 595.6 | 586.6 | 531,047,326 | 33,383,702 |
+| 480×270 | 15.575 | 6.367 | 371.6 | 362.6 | 282,037,726 | 33,206,102 |
+
+These are single-run wall times on a shared machine, not a controlled throughput claim.
+Earlier after runs were 78.919/5.926 and 195.972/21.651 ms/frame respectively while other
+Rust builds were running; allocation counts/bytes were identical in every after run.
+Full-canvas time has not improved in these measurements. Allocated bytes drop by 93.7%
+and 88.2%; the remaining approximately 33 MB/frame is primarily the owned output image.
+
+The renderer owns a size-keyed scratch pool shared with its nested renderers. Buffers are
+returned after each layer/pass, fully initialized before reuse, and retained across frames
+up to 16 slots/192 MiB. Only uniquely owned source buffers are recycled; cached/shared
+sources remain untouched. Affine isolation, matte application and preserve-alpha blending
+use the warp's affected rectangle (the union for styled passes). Stencils, motion-blurred
+placement and unknown bounds retain full-canvas processing. Dissolve keeps canvas-global
+noise coordinates. Clearing scratch still covers its whole allocation.
+
+Correctness verification captured all 859 output frames from the baseline render library
+tests as dimensions plus raw little-endian f32 bits, then compared every byte against the
+pooled implementation; all matched. This temporary capture instrumentation was removed,
+and no golden images were changed. Permanent tests compare bounded/full passes for every
+blend mode and matte kind, moving/resized pooled frames against fresh renderers, and pool
+clearing/retention. Re-compositing the same prepared frame allocates **zero scratch buffers**;
+Rayon still allocates 24 small task records (1,472 bytes) for eight layers. A separate full
+renderer test bounds allocations to the returned image plus evaluator metadata. Neither
+test claims that the whole renderer is allocation-free.
+
+Final validation with explicitly pinned rustup stable and `CARGO_TARGET_DIR=target-112`:
+render/raster tests passed (385 passed, 0 failed, 2 ignored); crate and workspace
+`clippy --all-targets -- -D warnings`, formatting and all `cargo xtask ci` stages passed
+(5,011 tests passed, 0 failed, 33 ignored; 40 attributed assets; 33 wasm crates).
+The disk-cache tests needed `TMPDIR` on a disposable 4 GiB APFS sparse volume under
+`target-112/target/`: host free space was below their existing cache reservation threshold.
+The volume was detached and all `target-112` artifacts removed after validation.
+Existing wasm UI unused-variable/dead-code warnings remain unrelated to this change.
+
 ### Render benchmark (`cargo xtask bench`)
 
 ```sh

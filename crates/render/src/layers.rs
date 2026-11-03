@@ -1,5 +1,6 @@
 use super::frames::adaptive_samples;
 use super::opts::{LayerTiming, Through};
+use super::scratch::zip_region;
 use super::{
     Arc, BlendMode, Buf, Comp, EvalCtx, Image, IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, Layer, LayerSource, Mat3,
     MatteKind, ParallelIterator, Quality, Region, Renderer, Sampling, Tick, WarpOpts, cache, color, composite_warp_changed, masks, styles, vec2,
@@ -11,6 +12,16 @@ struct PlacementBlend {
     opacity: f32,
     quantize: Option<f32>,
 }
+
+struct Isolation {
+    image: Image,
+    matte: Option<Image>,
+    region: Option<[u32; 4]>,
+}
+
+#[cfg(test)]
+#[path = "tests/compose_buffers.rs"]
+mod buffer_tests;
 
 /// A motion-blur shutter: the comp's, or for a collapsed precomp's layers the outermost
 /// containing comp's (they are drawn into its frames).
@@ -224,11 +235,12 @@ impl<'a> Renderer<'a> {
         if bufs.iter().any(|b| (b.scale - scale).abs() > 1e-9) || !(w * h).is_finite() || w * h > (1u64 << 26) as f64 {
             return self.source(ctx, layer);
         }
-        let mut acc = Image::new(w as u32, h as u32);
+        let mut acc = self.scratch.take(w as u32, h as u32)?;
         let k = 1.0 / bufs.len() as f32;
-        for b in &bufs {
+        for b in bufs {
             let m = Mat3::translate(vec2(off[0] - b.offset[0], off[1] - b.offset[1]));
             effectcraft_raster::accumulate_warp(&mut acc, &b.img, &m, effectcraft_raster::Sampling::Bilinear, k);
+            self.scratch.recycle(b.img);
         }
         Some(Buf { img: acc, offset: off, scale })
     }
@@ -359,18 +371,23 @@ impl<'a> Renderer<'a> {
     /// also quantised to `quantize` levels; see [`composite_warp_changed`]).
     fn place_changed(&self, ctx: &EvalCtx, layer: &Layer, buf: &Buf, target: &mut Image, blend: PlacementBlend) -> Option<[u32; 4]> {
         let PlacementBlend { mode, opacity, quantize } = blend;
+        if self.mb_samples(ctx, layer, buf) <= 1 {
+            let opts = WarpOpts { sampling: self.sampling(layer), opacity, mode, seed: layer.id.0 as u32, clip: None };
+            return composite_warp_changed(target, &buf.img, &self.buf_matrix(ctx, layer, buf), &opts, quantize);
+        }
         let pl = self.placement(ctx, layer, buf);
         let opts = WarpOpts { sampling: pl.sampling, opacity, mode, seed: pl.seed, clip: None };
         if let [m] = pl.matrices.as_slice() {
             return composite_warp_changed(target, &buf.img, m, &opts, quantize);
         }
         // Sub-samples sum straight into one buffer (each warp is row-parallel).
-        let mut acc = Image::new(target.width, target.height);
+        let mut acc = self.scratch.take(target.width, target.height)?;
         let k = 1.0 / pl.matrices.len() as f32;
         for m in &pl.matrices {
             effectcraft_raster::accumulate_warp(&mut acc, &buf.img, m, opts.sampling, k);
         }
         target.blend_from(&acc, mode, opacity, pl.seed);
+        self.scratch.recycle(acc);
         None
     }
 
@@ -406,6 +423,7 @@ impl<'a> Renderer<'a> {
             self.composite_styled(ctx, layer, &st, canvas, opacity);
             Region::Full
         };
+        self.recycle_styled(st);
         if let (Some(prof), Some(mut timing)) = (self.profile, timing) {
             timing.process_ms = (t1 - t0).as_secs_f64() * 1e3;
             timing.composite_ms = t1.elapsed().as_secs_f64() * 1e3;
@@ -416,6 +434,20 @@ impl<'a> Renderer<'a> {
         changed
     }
 
+    fn recycle_styled(&self, styled: StyledLayer) {
+        for (buffer, _) in styled.passes {
+            self.recycle_buf(buffer);
+        }
+        self.recycle_buf(styled.content);
+        self.recycle_buf(styled.body);
+    }
+
+    fn recycle_buf(&self, buffer: Arc<Buf>) {
+        if let Ok(buffer) = Arc::try_unwrap(buffer) {
+            self.scratch.recycle(buffer.img);
+        }
+    }
+
     /// Composite a styled layer: exterior passes with their own modes, then the body with the
     /// layer's mode; the layer's opacity fades the whole stack. Knockout clears what is below the
     /// layer's content; switched-off R/G/B channels keep the values below.
@@ -423,17 +455,23 @@ impl<'a> Renderer<'a> {
         let bl = styles::blending(ctx, layer);
         let matte = layer.track_matte.is_some_and(|tm| tm.layer != layer.id && ctx.comp.layer(tm.layer).is_some());
         if matte || layer.preserve_transparency {
-            let mut iso = Image::new(canvas.width, canvas.height);
+            let Some(mut iso) = self.scratch.take(canvas.width, canvas.height) else { return };
+            let mut region = Some([0; 4]);
             for (b, m) in &st.passes {
-                self.place(ctx, layer, b, &mut iso, *m, 1.0);
+                let drawn = self.place_changed(ctx, layer, b, &mut iso, PlacementBlend { mode: *m, opacity: 1.0, quantize: None });
+                region = union_regions(region, drawn);
             }
-            self.place(ctx, layer, &st.body, &mut iso, BlendMode::Normal, 1.0);
-            self.composite_iso(ctx, layer, iso, canvas, opacity);
+            let drawn = self.place_changed(ctx, layer, &st.body, &mut iso, PlacementBlend { mode: BlendMode::Normal, opacity: 1.0, quantize: None });
+            let region = union_regions(region, drawn);
+            self.composite_isolated(ctx, layer, Isolation { image: iso, matte: None, region }, canvas, opacity);
             return;
         }
-        let mut tmp = canvas.clone();
+        let Some(mut tmp) = self.scratch.copy(canvas) else { return };
         if bl.knockout > 0 {
-            let mut k = Image::new(canvas.width, canvas.height);
+            let Some(mut k) = self.scratch.take(canvas.width, canvas.height) else {
+                self.scratch.recycle(tmp);
+                return;
+            };
             self.place(ctx, layer, &st.content, &mut k, BlendMode::Normal, 1.0);
             tmp.data.par_iter_mut().zip(k.data.par_iter()).for_each(|(p, q)| {
                 let keep = 1.0 - q[3].clamp(0.0, 1.0);
@@ -441,6 +479,7 @@ impl<'a> Renderer<'a> {
                     *c *= keep;
                 }
             });
+            self.scratch.recycle(k);
         }
         for (b, m) in &st.passes {
             self.place(ctx, layer, b, &mut tmp, *m, 1.0);
@@ -453,6 +492,7 @@ impl<'a> Renderer<'a> {
                 c[i] += (v - c[i]) * opacity;
             }
         });
+        self.scratch.recycle(tmp);
     }
 
     /// Composite a plain layer; returns the canvas pixels it changed when they are known (then
@@ -463,9 +503,9 @@ impl<'a> Renderer<'a> {
             return self.place_changed(ctx, layer, buf, canvas, PlacementBlend { mode: layer.blend_mode, opacity, quantize });
         }
         // Render in isolation, then matte / preserve transparency, then blend.
-        let mut iso = Image::new(canvas.width, canvas.height);
-        self.place(ctx, layer, buf, &mut iso, BlendMode::Normal, 1.0);
-        self.composite_iso(ctx, layer, iso, canvas, opacity);
+        let mut iso = self.scratch.take(canvas.width, canvas.height)?;
+        let region = self.place_changed(ctx, layer, buf, &mut iso, PlacementBlend { mode: BlendMode::Normal, opacity: 1.0, quantize: None });
+        self.composite_isolated(ctx, layer, Isolation { image: iso, matte: None, region }, canvas, opacity);
         None
     }
 
@@ -476,37 +516,45 @@ impl<'a> Renderer<'a> {
 
     /// [`Self::composite_iso`] with the track matte's pixels already drawn (`matte`, e.g. a 3D
     /// matte seen through the camera); otherwise the matte layer is placed in 2D.
-    pub(crate) fn composite_iso_with(&self, ctx: &EvalCtx, layer: &Layer, mut iso: Image, canvas: &mut Image, opacity: f32, matte_img: Option<Image>) {
-        self.apply_track_matte(ctx, layer, &mut iso, matte_img);
+    pub(crate) fn composite_iso_with(&self, ctx: &EvalCtx, layer: &Layer, iso: Image, canvas: &mut Image, opacity: f32, matte_img: Option<Image>) {
+        self.composite_isolated(ctx, layer, Isolation { image: iso, matte: matte_img, region: None }, canvas, opacity);
+    }
+
+    fn composite_isolated(&self, ctx: &EvalCtx, layer: &Layer, isolated: Isolation, canvas: &mut Image, opacity: f32) {
+        let Isolation { image: mut iso, matte, region } = isolated;
+        let region = region.filter(|_| !layer.blend_mode.is_stencil()).unwrap_or([0, 0, canvas.width, canvas.height]);
+        self.apply_track_matte(ctx, layer, &mut iso, matte, region);
         if layer.preserve_transparency {
-            iso.data.par_iter_mut().zip(canvas.data.par_iter()).for_each(|(p, q)| {
+            zip_region(&mut iso, canvas, region, |p, q| {
                 for c in p.iter_mut() {
                     *c *= q[3];
                 }
             });
         }
-        canvas.blend_from(&iso, layer.blend_mode, opacity, layer.id.0 as u32);
+        canvas.blend_from_region(&iso, layer.blend_mode, opacity, layer.id.0 as u32, region);
+        self.scratch.recycle(iso);
     }
 
     /// Multiply `img` (comp-sized) by the layer's track matte, if it has one; `matte_img` as in
     /// [`Self::composite_iso_with`].
-    fn apply_track_matte(&self, ctx: &EvalCtx, layer: &Layer, img: &mut Image, matte_img: Option<Image>) {
+    fn apply_track_matte(&self, ctx: &EvalCtx, layer: &Layer, img: &mut Image, matte_img: Option<Image>, region: [u32; 4]) {
         let matte = layer.track_matte.and_then(|tm| ctx.comp.layer(tm.layer).filter(|m| m.id != layer.id).map(|m| (m, tm.kind)));
         if let Some((m, kind)) = matte {
             let mimg = match matte_img {
                 Some(i) if i.width == img.width && i.height == img.height => i,
                 _ => {
-                    let mut mimg = Image::new(img.width, img.height);
+                    let Some(mut mimg) = self.scratch.take(img.width, img.height) else { return };
                     if m.is_active_at(ctx.time)
                         && let Some(mb) = self.layer_buf(ctx, m)
                     {
                         let mo = ctx.opacity(m) as f32;
                         self.place(ctx, m, &mb, &mut mimg, BlendMode::Normal, mo);
+                        self.recycle_buf(mb);
                     }
                     mimg
                 }
             };
-            img.data.par_iter_mut().zip(mimg.data.par_iter()).for_each(|(p, q)| {
+            zip_region(img, &mimg, region, |p, q| {
                 let k = match kind {
                     MatteKind::Alpha => q[3],
                     MatteKind::AlphaInverted => 1.0 - q[3],
@@ -518,6 +566,9 @@ impl<'a> Renderer<'a> {
                     *c *= k;
                 }
             });
+            self.scratch.recycle(mimg);
+        } else if let Some(matte) = matte_img {
+            self.scratch.recycle(matte);
         }
     }
 
@@ -526,11 +577,19 @@ impl<'a> Renderer<'a> {
     fn draw_adjustment(&self, ctx: &EvalCtx, layer: &Layer, canvas: &mut Image, opacity: f32) {
         let Some(mut foot) = self.source(ctx, layer) else { return };
         let _ = masks::apply(ctx, layer, &mut foot, self.mask_blur(ctx, layer));
-        let mut matte = Image::new(canvas.width, canvas.height);
+        let Some(mut matte) = self.scratch.take(canvas.width, canvas.height) else {
+            self.scratch.recycle(foot.img);
+            return;
+        };
         self.place(ctx, layer, &foot, &mut matte, BlendMode::Normal, 1.0);
-        self.apply_track_matte(ctx, layer, &mut matte, None);
+        self.scratch.recycle(foot.img);
+        self.apply_track_matte(ctx, layer, &mut matte, None, [0, 0, canvas.width, canvas.height]);
         let o = self.roi_offset().map(|(x, y, _, _)| [-x, -y]).unwrap_or([0.0; 2]);
-        let mut below = Buf { img: canvas.clone(), offset: o, scale: self.opts.scale };
+        let Some(below) = self.scratch.copy(canvas) else {
+            self.scratch.recycle(matte);
+            return;
+        };
+        let mut below = Buf { img: below, offset: o, scale: self.opts.scale };
         // Effects run in the working space, not the linear blending space.
         if let Some(c) = self.pipe.from_blend() {
             color::convert(&mut below.img, &c);
@@ -546,6 +605,8 @@ impl<'a> Renderer<'a> {
             color::convert(&mut adjusted.img, &c);
         }
         if adjusted.img.width != canvas.width || adjusted.img.height != canvas.height {
+            self.scratch.recycle(adjusted.img);
+            self.scratch.recycle(matte);
             return;
         }
         if layer.blend_mode != BlendMode::Normal {
@@ -558,6 +619,8 @@ impl<'a> Renderer<'a> {
                 }
             });
             canvas.blend_from(&iso, layer.blend_mode, opacity, layer.id.0 as u32);
+            self.scratch.recycle(iso);
+            self.scratch.recycle(matte);
             return;
         }
         canvas.data.par_iter_mut().zip(adjusted.img.data.par_iter()).zip(matte.data.par_iter()).for_each(|((c, a), m)| {
@@ -566,6 +629,8 @@ impl<'a> Renderer<'a> {
                 c[i] += (a[i] - c[i]) * k;
             }
         });
+        self.scratch.recycle(adjusted.img);
+        self.scratch.recycle(matte);
     }
 }
 
@@ -610,4 +675,16 @@ fn narrow(footprint: Region, drawn: Option<[u32; 4]>) -> Region {
             if q.x0 >= q.x1 || q.y0 >= q.y1 { Region::Empty } else { Region::Rect(q) }
         }
     }
+}
+
+fn union_regions(left: Option<[u32; 4]>, right: Option<[u32; 4]>) -> Option<[u32; 4]> {
+    let left = left?;
+    let right = right?;
+    if left[0] >= left[2] || left[1] >= left[3] {
+        return Some(right);
+    }
+    if right[0] >= right[2] || right[1] >= right[3] {
+        return Some(left);
+    }
+    Some([left[0].min(right[0]), left[1].min(right[1]), left[2].max(right[2]), left[3].max(right[3])])
 }

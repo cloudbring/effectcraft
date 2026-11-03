@@ -120,6 +120,7 @@ impl<'a> Renderer<'a> {
             top: true,
             through: [None; MAX_THROUGH],
             through_lost: false,
+            scratch: Arc::new(super::scratch::BufferPool::default()),
         }
     }
 
@@ -176,6 +177,7 @@ impl<'a> Renderer<'a> {
             top: false,
             through: [None; MAX_THROUGH],
             through_lost: false,
+            scratch: self.scratch.clone(),
             ..*self
         }
     }
@@ -274,7 +276,17 @@ impl<'a> Renderer<'a> {
             *slot = Some(link);
         }
         Some((
-            Renderer { opts: self.nested_opts(), depth: self.depth + 1, outer, opacity_mul: opacity, collapse3d: Some(c3), through, through_lost, ..*self },
+            Renderer {
+                opts: self.nested_opts(),
+                depth: self.depth + 1,
+                outer,
+                opacity_mul: opacity,
+                collapse3d: Some(c3),
+                through,
+                through_lost,
+                scratch: self.scratch.clone(),
+                ..*self
+            },
             nctx,
         ))
     }
@@ -373,7 +385,7 @@ impl<'a> Renderer<'a> {
     /// This renderer with another accelerator (or none): the passes of
     /// [`passes::in_passes`] render with the accelerator, its CPU fallback without.
     pub fn with_accel(&self, accel: Option<&'a dyn Accelerator>) -> Renderer<'a> {
-        Renderer { accel, ..*self }
+        Renderer { accel, scratch: self.scratch.clone(), ..*self }
     }
 
     /// The accelerator to use for this render, if any (see [`Backend`]).
@@ -439,7 +451,7 @@ impl<'a> Renderer<'a> {
             && comp.has_3d()
             && (roi_inside(r, comp.width, comp.height) || comp.renderer == effectcraft_project::Renderer::Advanced3D)
         {
-            let full = Renderer { opts: RenderOpts { roi: None, ..self.opts }, ..*self }.comp_frame(comp_id, t);
+            let full = Renderer { opts: RenderOpts { roi: None, ..self.opts }, scratch: self.scratch.clone(), ..*self }.comp_frame(comp_id, t);
             let (x0, y0) = ((r[0] * s).round() as i64, (r[1] * s).round() as i64);
             let (rw, rh) = (((r[2] * s).round() as u32).max(1), ((r[3] * s).round() as u32).max(1));
             let mut out = Image::new(rw, rh);
@@ -693,14 +705,14 @@ impl<'a> Renderer<'a> {
                 let w = ((sol.width as f64 * s).ceil() as u32).max(1);
                 let h = ((sol.height as f64 * s).ceil() as u32).max(1);
                 if layer.switches.adjustment {
-                    return Some(Buf { img: Image::filled(w, h, [1.0; 4]), offset: [0.0; 2], scale: s });
+                    return Some(Buf { img: self.scratch.filled(w, h, [1.0; 4])?, offset: [0.0; 2], scale: s });
                 }
                 let mut c = sol.color;
                 if let Some(conv) = self.pipe.authored_in() {
                     c = conv.apply(c);
                 }
                 let px = self.pipe.quantize_px([c[0], c[1], c[2], 1.0]);
-                Some(Buf { img: Image::filled(w, h, px), offset: [0.0; 2], scale: s })
+                Some(Buf { img: self.scratch.filled(w, h, px)?, offset: [0.0; 2], scale: s })
             }
             LayerSource::Comp { item } => {
                 if self.project.comp_contains(*item, ctx.comp_id) {

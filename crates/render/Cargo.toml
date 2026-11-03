@@ -26,3 +26,6 @@ rayon = { workspace = true }
 web-time = { workspace = true }
 serde = { workspace = true }
 log = { workspace = true }
+
+[dev-dependencies]
+allocation-counter = "0.8.1"
