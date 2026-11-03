@@ -14,3 +14,6 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 tempfile = "3"
 pkg-config = "0.3"
+
+# TODO: repoint to storytold/craft-libs after upstream merge
+craft-xtask = { git = "https://github.com/cloudbring/craft-libs", branch = "algo/integration" }

@@ -117,6 +117,7 @@ Come tell us what matters most to you on [Discord](https://discord.gg/artcraft).
 
 ## Progress log
 
+- 2026-11-03: #70: delegate xtask version, ico, layers and pdf-deps to craft-xtask, keeping assets, wasm, web, bench, audio-backend and ci local.
 - 2026-10-30: Text strokes take a Line Join (Miter, Round or Bevel) in the Character panel,
   Miter for new text as in After Effects (#2077). In the Timeline, effects, masks and shape items
   drag to a new place in their stack (#2210) and Shift-click adds them to the selection, so one

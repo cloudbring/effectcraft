@@ -1,0 +1,1 @@
+PDF backend: pinned parser only; no Hayro interpreter, rasterizer or bundled CMaps

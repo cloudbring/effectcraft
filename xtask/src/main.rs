@@ -1,7 +1,7 @@
-//! Workspace automation: `cargo xtask <layers|assets|pdf-deps|wasm|web|ico|ci>`.
+//! Workspace automation: `cargo xtask <layers|assets|pdf-deps|wasm|web|ico|version|ci|audio-backend|bench>`.
 //!
 //! - `layers`: enforces the dependency layering of `docs/architecture.md` §1 (downward-only edges,
-//!   listed same-layer edges, no UI/OS crates below L5).
+//!   listed same-layer edges, no UI/OS crates below L5) via `craft_xtask::layers`.
 //! - `wasm`: `cargo check --target wasm32-unknown-unknown` for every crate in L0–L4, the egui UI
 //!   and the web app.
 //! - `web [--dev] [--serve PORT]`: build the web app (`apps/effectcraft-web`) into
@@ -9,153 +9,107 @@
 //! - `assets`: every asset file (image, icon, font, LUT, audio, video…) has a complete
 //!   `<file>.attribution` sidecar and an entry in `ATTRIBUTION.md` (AGENTS.md §1).
 //! - `ico <out.ico> <in.png>…`: pack PNGs into a Windows `.ico` (used by `packaging/icons.sh`).
+//! - `version [set X.Y.Z[-pre] | tag]`: read or set the workspace version (`craft_xtask::version`).
 //! - `ci`: fmt check, clippy -D warnings, tests (`cargo nextest run` when installed) and doctests,
 //!   PDF dependency policy, layers, assets, wasm. Everything builds in the dev profile.
 //! - `bench [--bin CLI] [--quick] [--compare OLD.jsonl] …`: render benchmark of generated scenarios
 //!   (memory, CPU, wall time) into `target/bench/results.jsonl` (`bench.rs`, docs/testing.md).
 
 mod bench;
-mod ico;
-mod pdf_deps;
-mod version;
 
+use std::path::Path;
 use std::process::{Command, ExitCode};
 
+use craft_xtask::{Cargo, ico, layers, pdf_deps, version};
 use serde_json::Value;
 
-/// (crate name without the `effectcraft-` prefix, layer). See `docs/architecture.md` §1.
-const LAYERS: &[(&str, u8)] = &[
-    ("time", 0),
-    ("geom", 0),
-    ("color", 0),
-    ("vp9enc", 0),
-    ("testkit", 0),
-    ("opusenc", 0),
-    ("hevcenc", 0),
-    ("av1enc", 0),
-    ("raster", 1),
-    ("keyframe", 1),
-    ("path", 1),
-    ("psd", 1),
-    ("segment", 1),
-    ("project", 2),
-    ("text", 2),
-    ("effects", 2),
-    ("track", 2),
-    ("svg", 2),
-    ("pdf", 2),
-    ("model", 2),
-    ("render", 3),
-    ("media", 3),
-    ("expr", 3),
-    ("export", 3),
-    ("gpu", 3),
-    ("sam2", 3),
-    ("lottie", 3),
-    ("format", 3),
-    ("plugin", 3),
-    ("interchange", 3),
-    ("engine", 4),
-    ("script", 4),
-    ("host", 4),
-    ("ui-egui", 5),
-    ("automation", 5),
-    ("effectcraft", 6),
-    ("cli", 6),
-    ("web", 6),
-];
-
-/// Allowed same-layer edges (from, to).
-const SAME_LAYER: &[(&str, &str)] = &[
-    ("path", "keyframe"),
-    ("path", "raster"),
-    ("text", "path"),
-    ("pdf", "svg"),
-    ("pdf", "text"),
-    ("effects", "project"),
-    ("effects", "text"),
-    ("effects", "path"),
-    ("effects", "track"),
-    ("media", "render"),
-    ("expr", "render"),
-    ("export", "render"),
-    ("export", "media"),
-    ("gpu", "render"),
-    ("lottie", "format"),
-    ("host", "engine"),
-    ("script", "engine"),
-    ("host", "script"),
-    ("cli", "effectcraft"),
-];
-
-/// Crates that must not appear below L5 (UI toolkits, windowing, OS audio/menus).
-const UI_ONLY: &[&str] = &["craft-ui", "egui", "eframe", "egui-wgpu", "winit", "rfd", "cpal", "muda"];
-
-fn short(name: &str) -> &str {
-    name.strip_prefix("effectcraft-").unwrap_or(name)
+pub fn version_config(root: &Path) -> version::Config {
+    version::Config { cargo: Cargo { root: root.into(), ..Cargo::default() }, ..version::Config::default() }
 }
 
-fn layer_of(name: &str) -> Option<u8> {
-    LAYERS.iter().find(|(n, _)| *n == short(name)).map(|(_, l)| *l)
+fn names(values: &[&str]) -> Vec<String> {
+    values.iter().map(|v| (*v).into()).collect()
 }
 
-fn metadata() -> Result<Value, String> {
-    let out = Command::new(env!("CARGO")).args(["metadata", "--format-version", "1", "--no-deps"]).output().map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).into());
-    }
-    serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())
+fn ec(values: &[&str]) -> Vec<String> {
+    values.iter().map(|v| if *v == "effectcraft" { (*v).into() } else { format!("effectcraft-{v}") }).collect()
 }
 
-fn workspace_crates(md: &Value) -> Vec<(String, Vec<String>)> {
-    md["packages"]
-        .as_array()
+pub fn layers_config(root: &Path) -> layers::Config {
+    layers::Config {
+        root: root.into(),
+        layers: [
+            ("L0", &["time", "geom", "color", "vp9enc", "testkit", "opusenc", "hevcenc", "av1enc"][..]),
+            ("L1", &["raster", "keyframe", "path", "psd", "segment"]),
+            ("L2", &["project", "text", "effects", "track", "svg", "pdf", "model"]),
+            ("L3", &["render", "media", "expr", "export", "gpu", "sam2", "lottie", "format", "plugin", "interchange"]),
+            ("L4", &["engine", "script", "host"]),
+            ("L5", &["ui-egui", "automation"]),
+            ("L6", &["effectcraft", "cli", "web"]),
+        ]
         .into_iter()
-        .flatten()
-        .filter(|p| p["name"] != "xtask")
-        .map(|p| {
-            let deps = p["dependencies"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|d| d["kind"].is_null() || d["kind"] == "build")
-                .filter_map(|d| d["name"].as_str().map(str::to_string))
-                .collect();
-            (p["name"].as_str().unwrap_or_default().to_string(), deps)
-        })
-        .collect()
+        .map(|(label, crates)| (label.into(), ec(crates)))
+        .collect(),
+        exempt: names(&["xtask"]),
+        ignore_dev: true,
+        allowed_edges: [
+            ("path", "keyframe"),
+            ("path", "raster"),
+            ("text", "path"),
+            ("pdf", "svg"),
+            ("pdf", "text"),
+            ("effects", "project"),
+            ("effects", "text"),
+            ("effects", "path"),
+            ("effects", "track"),
+            ("media", "render"),
+            ("expr", "render"),
+            ("export", "render"),
+            ("export", "media"),
+            ("gpu", "render"),
+            ("lottie", "format"),
+            ("host", "engine"),
+            ("script", "engine"),
+            ("host", "script"),
+            ("cli", "effectcraft"),
+        ]
+        .into_iter()
+        .map(|(a, b)| (format!("effectcraft-{a}"), if b == "effectcraft" { b.into() } else { format!("effectcraft-{b}") }))
+        .collect(),
+        external_rules: vec![layers::ExternalRule {
+            dependencies: names(&["craft-ui", "egui", "eframe", "egui-wgpu", "winit", "rfd", "cpal", "muda"]),
+            allowed_from: ec(&["ui-egui", "automation", "effectcraft", "cli", "web"]),
+            allowed_dev_from: Vec::new(),
+        }],
+        ..layers::Config::default()
+    }
 }
 
-fn layers() -> Result<(), String> {
-    let md = metadata()?;
-    let mut errors = Vec::new();
-    for (name, deps) in workspace_crates(&md) {
-        let Some(l) = layer_of(&name) else {
-            errors.push(format!("{name}: not assigned a layer (add it to xtask LAYERS and docs/architecture.md §1)"));
-            continue;
-        };
-        for d in &deps {
-            if l < 5 && UI_ONLY.contains(&d.as_str()) {
-                errors.push(format!("{name} (L{l}) depends on UI/OS crate `{d}`"));
-            }
-            if !d.starts_with("effectcraft-") {
-                continue;
-            }
-            let Some(dl) = layer_of(d) else { continue };
-            let (a, b) = (short(&name), short(d));
-            if dl > l {
-                errors.push(format!("{a} (L{l}) depends upward on {b} (L{dl})"));
-            } else if dl == l && l > 0 && !SAME_LAYER.contains(&(a, b)) {
-                errors.push(format!("{a} → {b}: same-layer edge (L{l}) not in the allowed list"));
-            }
-        }
+const PDF_REV: &str = "92d392cff132eaf53e13afff77f38b5c11b73aa0";
+
+pub fn pdf_deps_config(root: &Path) -> pdf_deps::Config {
+    let source = pdf_deps::git_source("https://github.com/storytold/craft-libs", PDF_REV);
+    pdf_deps::Config {
+        cargo: Cargo { root: root.into(), ..Cargo::default() },
+        packages: [("craft-pdf", "0.1.0", Some(&["read"][..])), ("hayro-syntax", "0.7.2", Some(&["std"][..])), ("hayro-jbig2", "0.3.0", None)]
+            .into_iter()
+            .map(|(name, version, exact)| pdf_deps::PackagePin {
+                name: name.into(),
+                version: version.into(),
+                source: source.clone(),
+                required_features: Vec::new(),
+                exact_features: exact.map(names),
+            })
+            .collect(),
+        forbidden_active: names(&["hayro", "hayro-interpret", "hayro-cmap", "krilla"]),
+        ..pdf_deps::Config::default()
     }
-    if errors.is_empty() {
-        println!("layers: ok");
-        Ok(())
-    } else {
-        Err(errors.join("\n"))
-    }
+}
+
+fn cmd_pdf_deps(args: &[String]) -> Result<(), String> {
+    let _report = pdf_deps::compute(&pdf_deps_config(&root()), &pdf_deps::Args::parse(args)?)?;
+    println!("PDF backend: pinned parser only; no Hayro interpreter, rasterizer or bundled CMaps");
+    Ok(())
 }
 
 /// File extensions that count as assets (AGENTS.md §1).
@@ -235,13 +189,14 @@ fn run(cmd: &mut Command) -> Result<(), String> {
 const WEB_CRATES: &[&str] = &["effectcraft-ui-egui", "effectcraft-web"];
 
 fn wasm() -> Result<(), String> {
-    let md = metadata()?;
+    let cfg = layers_config(&root());
+    let crates = layers::from_metadata(&Cargo { root: root(), ..Cargo::default() }.metadata(false)?)?;
     let mut cmd = Command::new(env!("CARGO"));
     cmd.args(["check", "--target", "wasm32-unknown-unknown", "--keep-going"]);
     let mut n = 0;
-    for (name, _) in workspace_crates(&md) {
-        if layer_of(&name).is_some_and(|l| l <= 4) || WEB_CRATES.contains(&name.as_str()) {
-            cmd.args(["-p", &name]);
+    for c in crates {
+        if cfg.layers.iter().take(5).any(|(_, m)| m.contains(&c.name)) || WEB_CRATES.contains(&c.name.as_str()) {
+            cmd.args(["-p", &c.name]);
             n += 1;
         }
     }
@@ -534,8 +489,8 @@ fn ci() -> Result<(), String> {
         ("fmt", || run(Command::new(env!("CARGO")).args(["fmt", "--check"]))),
         ("clippy", || run(Command::new(env!("CARGO")).args(["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]))),
         ("tests", tests),
-        ("pdf-deps", || pdf_deps::run(&root())),
-        ("layers", layers),
+        ("pdf-deps", || cmd_pdf_deps(&[])),
+        ("layers", || layers::run(&layers_config(&root()), &[])),
         ("assets", assets),
         ("wasm", wasm),
     ];
@@ -543,26 +498,35 @@ fn ci() -> Result<(), String> {
     if failed.is_empty() { Ok(()) } else { Err(format!("ci failed: {}", failed.join(", "))) }
 }
 
+fn usage() -> String {
+    format!(
+        "usage: cargo xtask <layers|assets|pdf-deps|wasm|web [--dev] [--serve PORT]|ico OUT.ico IN.png…|version [set X.Y.Z]|ci|audio-backend|bench [--bin CLI] [--quick] [--project F --comp C] [--compare OLD.jsonl] (--help)>\n\nShared task syntax:\n  {}\n  {}\n  {}\n  {}",
+        layers::cli_help(),
+        pdf_deps::cli_help(),
+        ico::cli_help(),
+        version::cli_help(),
+    )
+}
+
 fn main() -> ExitCode {
     let task = std::env::args().nth(1).unwrap_or_default();
+    let rest: Vec<String> = std::env::args().skip(2).collect();
     let r = match task.as_str() {
-        "layers" => layers(),
+        "layers" => layers::run(&layers_config(&root()), &rest),
         "wasm" => wasm(),
         "assets" => assets(),
-        "pdf-deps" => pdf_deps::run(&root()),
+        "pdf-deps" => cmd_pdf_deps(&rest),
         "ci" => ci(),
         "audio-backend" => audio_backend(),
-        "web" => web(&std::env::args().skip(2).collect::<Vec<_>>()),
-        "bench" => bench::run(&root(), &std::env::args().skip(2).collect::<Vec<_>>()),
-        "ico" => {
-            let rest: Vec<String> = std::env::args().skip(2).collect();
-            ico::run(&rest.iter().map(String::as_str).collect::<Vec<_>>())
+        "web" => web(&rest),
+        "bench" => bench::run(&root(), &rest),
+        "ico" => ico::run(&ico::Config::default(), &rest),
+        "version" => version::run(&version_config(&root()), &rest),
+        "help" | "--help" | "-h" => {
+            println!("{}", usage());
+            Ok(())
         }
-        "version" => {
-            let rest: Vec<String> = std::env::args().skip(2).collect();
-            version::run(&root(), &rest.iter().map(String::as_str).collect::<Vec<_>>())
-        }
-        _ => Err("usage: cargo xtask <layers|assets|pdf-deps|wasm|web [--dev] [--serve PORT]|ico OUT.ico IN.png…|version [set X.Y.Z]|ci|audio-backend|bench [--bin CLI] [--quick] [--project F --comp C] [--compare OLD.jsonl] (--help)>".into()),
+        _ => Err(usage()),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,
@@ -575,13 +539,37 @@ fn main() -> ExitCode {
 
 /// The workspace root (the parent of `xtask/`).
 pub fn root() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("xtask has a parent dir").to_path_buf()
+    let dir = std::env::var_os("CARGO_MANIFEST_DIR").map(std::path::PathBuf::from).filter(|dir| dir.join("Cargo.toml").is_file());
+    let dir = dir.unwrap_or_else(|| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    dir.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod tests {
-    use super::audio_backend_missing_hint;
+    use super::*;
 
+    #[test]
+    fn configs_preserve_effectcraft_policies() {
+        let vcfg = version_config(&root());
+        assert!(!vcfg.strict_prerelease);
+        assert!(vcfg.refresh_lockfile && vcfg.online_fallback);
+
+        let lcfg = layers_config(&root());
+        assert!(lcfg.ignore_dev);
+        let edge = |from: &str, to: &str, kind: layers::DepKind, workspace: bool| layers::Crate {
+            name: from.into(),
+            deps: vec![layers::Dep { name: to.into(), kind, workspace }],
+        };
+        assert!(layers::check(&lcfg, &[edge("effectcraft-path", "effectcraft-keyframe", layers::DepKind::Normal, true)]).unwrap().is_empty());
+        assert!(!layers::check(&lcfg, &[edge("effectcraft-keyframe", "effectcraft-path", layers::DepKind::Normal, true)]).unwrap().is_empty());
+        assert!(!layers::check(&lcfg, &[edge("effectcraft-engine", "egui", layers::DepKind::Normal, false)]).unwrap().is_empty());
+
+        let pcfg = pdf_deps_config(&root());
+        assert_eq!(pcfg.packages.len(), 3);
+        assert_eq!(pcfg.forbidden_active, vec!["hayro", "hayro-interpret", "hayro-cmap", "krilla"]);
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn alsa_missing_names_the_package_for_each_distro() {
         let e = audio_backend_missing_hint(None);
@@ -590,6 +578,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn alsa_missing_appends_pkg_config_s_own_detail() {
         let e = audio_backend_missing_hint(Some("Package 'alsa' not found"));
