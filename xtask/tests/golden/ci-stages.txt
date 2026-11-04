@@ -1,0 +1,8 @@
+audio backend | -
+fmt | "fmt", "--check"
+clippy | "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"
+tests | -
+pdf-deps | -
+layers | -
+assets | -
+wasm | -
