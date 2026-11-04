@@ -1704,6 +1704,7 @@ dependencies = [
  "effectcraft-text",
  "effectcraft-time",
  "kurbo",
+ "proptest",
  "serde_json",
  "thiserror 2.0.21",
 ]
@@ -1848,6 +1849,7 @@ dependencies = [
  "kurbo",
  "log",
  "lz4_flex",
+ "proptest",
  "rayon",
  "serde",
  "web-time",
@@ -1893,6 +1895,7 @@ dependencies = [
  "craft-hash",
  "miniz_oxide 0.9.1",
  "ndarray",
+ "proptest",
  "rayon",
 ]
 
