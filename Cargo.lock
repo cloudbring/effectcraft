@@ -1428,7 +1428,7 @@ version = "0.21.0"
 dependencies = [
  "cpal",
  "craft-update",
- "effectcraft-engine",
+ "effectcraft-engine 0.21.0",
  "effectcraft-host",
  "effectcraft-ui-egui",
  "eframe",
@@ -1452,9 +1452,9 @@ dependencies = [
 name = "effectcraft-automation"
 version = "0.21.0"
 dependencies = [
- "effectcraft-engine",
+ "effectcraft-engine 0.21.0",
  "effectcraft-host",
- "effectcraft-model",
+ "effectcraft-model 0.21.0",
  "effectcraft-script",
  "image",
  "serde_json",
@@ -1474,14 +1474,14 @@ version = "0.21.0"
 dependencies = [
  "cpu-time",
  "effectcraft-automation",
- "effectcraft-engine",
+ "effectcraft-engine 0.21.0",
  "effectcraft-gpu",
  "effectcraft-host",
- "effectcraft-render",
- "effectcraft-sam2",
- "effectcraft-segment",
- "effectcraft-time",
- "effectcraft-track",
+ "effectcraft-render 0.21.0",
+ "effectcraft-sam2 0.21.0",
+ "effectcraft-segment 0.21.0",
+ "effectcraft-time 0.21.0",
+ "effectcraft-track 0.21.0",
  "effectcraft-ui-egui",
  "image",
  "serde_json",
@@ -1496,17 +1496,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "effectcraft-color"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "effectcraft-effects"
 version = "0.21.0"
 dependencies = [
  "chrono",
- "effectcraft-color",
- "effectcraft-geom",
- "effectcraft-keyframe",
- "effectcraft-project",
- "effectcraft-raster",
- "effectcraft-segment",
- "effectcraft-track",
+ "effectcraft-color 0.21.0",
+ "effectcraft-geom 0.21.0",
+ "effectcraft-keyframe 0.21.0",
+ "effectcraft-project 0.21.0",
+ "effectcraft-raster 0.21.0",
+ "effectcraft-segment 0.21.0",
+ "effectcraft-track 0.21.0",
+ "log",
+ "rayon",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "effectcraft-effects"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "chrono",
+ "effectcraft-color 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-geom 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-keyframe 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-project 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-raster 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-segment 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-track 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "log",
  "rayon",
  "serde",
@@ -1520,25 +1547,64 @@ dependencies = [
  "chrono",
  "craft-docpath",
  "craft-keymap",
- "effectcraft-color",
- "effectcraft-effects",
- "effectcraft-geom",
- "effectcraft-interchange",
- "effectcraft-keyframe",
- "effectcraft-lottie",
- "effectcraft-model",
- "effectcraft-path",
- "effectcraft-pdf",
- "effectcraft-project",
- "effectcraft-psd",
- "effectcraft-raster",
- "effectcraft-render",
- "effectcraft-sam2",
- "effectcraft-segment",
- "effectcraft-svg",
- "effectcraft-text",
- "effectcraft-time",
- "effectcraft-track",
+ "effectcraft-color 0.21.0",
+ "effectcraft-effects 0.21.0",
+ "effectcraft-geom 0.21.0",
+ "effectcraft-interchange 0.21.0",
+ "effectcraft-keyframe 0.21.0",
+ "effectcraft-lottie 0.21.0",
+ "effectcraft-model 0.21.0",
+ "effectcraft-path 0.21.0",
+ "effectcraft-pdf 0.21.0",
+ "effectcraft-project 0.21.0",
+ "effectcraft-psd 0.21.0",
+ "effectcraft-raster 0.21.0",
+ "effectcraft-render 0.21.0",
+ "effectcraft-sam2 0.21.0",
+ "effectcraft-segment 0.21.0",
+ "effectcraft-svg 0.21.0",
+ "effectcraft-text 0.21.0",
+ "effectcraft-time 0.21.0",
+ "effectcraft-track 0.21.0",
+ "exr",
+ "image",
+ "kurbo",
+ "log",
+ "rayon",
+ "same-file",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "web-time",
+]
+
+[[package]]
+name = "effectcraft-engine"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "chrono",
+ "craft-docpath",
+ "effectcraft-color 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-effects 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-geom 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-interchange 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-keyframe 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-lottie 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-model 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-path 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-pdf 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-project 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-psd 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-raster 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-render 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-sam2 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-segment 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-svg 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-text 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-time 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-track 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "exr",
  "image",
  "kurbo",
@@ -1557,16 +1623,16 @@ name = "effectcraft-export"
 version = "0.21.0"
 dependencies = [
  "effectcraft-av1enc",
- "effectcraft-color",
- "effectcraft-effects",
+ "effectcraft-color 0.21.0",
+ "effectcraft-effects 0.21.0",
  "effectcraft-hevcenc",
- "effectcraft-keyframe",
+ "effectcraft-keyframe 0.21.0",
  "effectcraft-media",
  "effectcraft-opusenc",
- "effectcraft-project",
- "effectcraft-raster",
- "effectcraft-render",
- "effectcraft-time",
+ "effectcraft-project 0.21.0",
+ "effectcraft-raster 0.21.0",
+ "effectcraft-render 0.21.0",
+ "effectcraft-time 0.21.0",
  "effectcraft-vp9enc",
  "filmcraft-aac",
  "filmcraft-h264enc",
@@ -1587,15 +1653,15 @@ name = "effectcraft-expr"
 version = "0.21.0"
 dependencies = [
  "boa_engine",
- "effectcraft-color",
- "effectcraft-effects",
- "effectcraft-geom",
- "effectcraft-keyframe",
- "effectcraft-path",
- "effectcraft-project",
- "effectcraft-render",
- "effectcraft-text",
- "effectcraft-time",
+ "effectcraft-color 0.21.0",
+ "effectcraft-effects 0.21.0",
+ "effectcraft-geom 0.21.0",
+ "effectcraft-keyframe 0.21.0",
+ "effectcraft-path 0.21.0",
+ "effectcraft-project 0.21.0",
+ "effectcraft-render 0.21.0",
+ "effectcraft-text 0.21.0",
+ "effectcraft-time 0.21.0",
  "serde_json",
 ]
 
@@ -1608,19 +1674,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "effectcraft-geom"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "effectcraft-gpu"
 version = "0.21.0"
 dependencies = [
  "bytemuck",
- "effectcraft-color",
- "effectcraft-effects",
- "effectcraft-geom",
- "effectcraft-keyframe",
- "effectcraft-project",
- "effectcraft-raster",
- "effectcraft-render",
- "effectcraft-text",
- "effectcraft-time",
+ "effectcraft-color 0.21.0",
+ "effectcraft-effects 0.21.0",
+ "effectcraft-geom 0.21.0",
+ "effectcraft-keyframe 0.21.0",
+ "effectcraft-project 0.21.0",
+ "effectcraft-raster 0.21.0",
+ "effectcraft-render 0.21.0",
+ "effectcraft-text 0.21.0",
+ "effectcraft-time 0.21.0",
  "js-sys",
  "log",
  "pollster 1.0.1",
@@ -1640,19 +1714,19 @@ dependencies = [
 name = "effectcraft-host"
 version = "0.21.0"
 dependencies = [
- "effectcraft-engine",
+ "effectcraft-engine 0.21.0",
  "effectcraft-export",
  "effectcraft-expr",
- "effectcraft-interchange",
+ "effectcraft-interchange 0.21.0",
  "effectcraft-media",
- "effectcraft-pdf",
+ "effectcraft-pdf 0.21.0",
  "effectcraft-plugin",
- "effectcraft-project",
- "effectcraft-psd",
- "effectcraft-raster",
+ "effectcraft-project 0.21.0",
+ "effectcraft-psd 0.21.0",
+ "effectcraft-raster 0.21.0",
  "effectcraft-script",
- "effectcraft-svg",
- "effectcraft-time",
+ "effectcraft-svg 0.21.0",
+ "effectcraft-time 0.21.0",
  "exr",
  "gif",
  "image",
@@ -1665,10 +1739,30 @@ dependencies = [
 name = "effectcraft-interchange"
 version = "0.21.0"
 dependencies = [
- "effectcraft-color",
- "effectcraft-keyframe",
- "effectcraft-project",
- "effectcraft-time",
+ "effectcraft-color 0.21.0",
+ "effectcraft-keyframe 0.21.0",
+ "effectcraft-project 0.21.0",
+ "effectcraft-time 0.21.0",
+ "filmcraft-color",
+ "filmcraft-geom",
+ "filmcraft-interchange",
+ "filmcraft-media",
+ "filmcraft-project",
+ "filmcraft-time",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "effectcraft-interchange"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "effectcraft-color 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-keyframe 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-project 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-time 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "filmcraft-color",
  "filmcraft-geom",
  "filmcraft-interchange",
@@ -1684,10 +1778,22 @@ dependencies = [
 name = "effectcraft-keyframe"
 version = "0.21.0"
 dependencies = [
- "effectcraft-color",
- "effectcraft-geom",
- "effectcraft-time",
+ "effectcraft-color 0.21.0",
+ "effectcraft-geom 0.21.0",
+ "effectcraft-time 0.21.0",
  "proptest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "effectcraft-keyframe"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "effectcraft-color 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-geom 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-time 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "serde",
  "serde_json",
 ]
@@ -1697,14 +1803,32 @@ name = "effectcraft-lottie"
 version = "0.21.0"
 dependencies = [
  "craft-docpath",
- "effectcraft-color",
- "effectcraft-effects",
- "effectcraft-keyframe",
- "effectcraft-path",
- "effectcraft-project",
- "effectcraft-render",
- "effectcraft-text",
- "effectcraft-time",
+ "effectcraft-color 0.21.0",
+ "effectcraft-effects 0.21.0",
+ "effectcraft-keyframe 0.21.0",
+ "effectcraft-path 0.21.0",
+ "effectcraft-project 0.21.0",
+ "effectcraft-render 0.21.0",
+ "effectcraft-text 0.21.0",
+ "effectcraft-time 0.21.0",
+ "kurbo",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "effectcraft-lottie"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "craft-docpath",
+ "effectcraft-color 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-effects 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-keyframe 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-path 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-project 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-text 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-time 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "kurbo",
  "serde_json",
  "thiserror 2.0.21",
@@ -1715,15 +1839,15 @@ name = "effectcraft-media"
 version = "0.21.0"
 dependencies = [
  "craft-docpath",
- "effectcraft-color",
- "effectcraft-model",
- "effectcraft-pdf",
- "effectcraft-project",
- "effectcraft-psd",
- "effectcraft-raster",
- "effectcraft-render",
- "effectcraft-svg",
- "effectcraft-time",
+ "effectcraft-color 0.21.0",
+ "effectcraft-model 0.21.0",
+ "effectcraft-pdf 0.21.0",
+ "effectcraft-project 0.21.0",
+ "effectcraft-psd 0.21.0",
+ "effectcraft-raster 0.21.0",
+ "effectcraft-render 0.21.0",
+ "effectcraft-svg 0.21.0",
+ "effectcraft-time 0.21.0",
  "exr",
  "filmcraft-aac",
  "filmcraft-codecs",
@@ -1746,7 +1870,21 @@ dependencies = [
 name = "effectcraft-model"
 version = "0.21.0"
 dependencies = [
- "effectcraft-geom",
+ "effectcraft-geom 0.21.0",
+ "image",
+ "log",
+ "miniz_oxide 0.9.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "effectcraft-model"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "effectcraft-geom 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "image",
  "log",
  "miniz_oxide 0.9.1",
@@ -1766,9 +1904,22 @@ dependencies = [
 name = "effectcraft-path"
 version = "0.21.0"
 dependencies = [
- "effectcraft-geom",
- "effectcraft-keyframe",
- "effectcraft-raster",
+ "effectcraft-geom 0.21.0",
+ "effectcraft-keyframe 0.21.0",
+ "effectcraft-raster 0.21.0",
+ "kurbo",
+ "linesweeper",
+ "tiny-skia 0.12.0",
+]
+
+[[package]]
+name = "effectcraft-path"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "effectcraft-geom 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-keyframe 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-raster 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "kurbo",
  "linesweeper",
  "tiny-skia 0.12.0",
@@ -1779,9 +1930,9 @@ name = "effectcraft-pdf"
 version = "0.21.0"
 dependencies = [
  "craft-pdf",
- "effectcraft-raster",
- "effectcraft-svg",
- "effectcraft-text",
+ "effectcraft-raster 0.21.0",
+ "effectcraft-svg 0.21.0",
+ "effectcraft-text 0.21.0",
  "image",
  "kurbo",
  "miniz_oxide 0.9.1",
@@ -1791,13 +1942,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "effectcraft-pdf"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "craft-pdf",
+ "effectcraft-svg 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-text 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "kurbo",
+ "miniz_oxide 0.9.1",
+ "skrifa",
+ "zune-jpeg",
+]
+
+[[package]]
 name = "effectcraft-plugin"
 version = "0.21.0"
 dependencies = [
- "effectcraft-effects",
- "effectcraft-keyframe",
- "effectcraft-project",
- "effectcraft-raster",
+ "effectcraft-effects 0.21.0",
+ "effectcraft-keyframe 0.21.0",
+ "effectcraft-project 0.21.0",
+ "effectcraft-raster 0.21.0",
  "serde_json",
  "wasmi",
 ]
@@ -1807,10 +1972,25 @@ name = "effectcraft-project"
 version = "0.21.0"
 dependencies = [
  "craft-ecproj-format",
- "effectcraft-color",
- "effectcraft-geom",
- "effectcraft-keyframe",
- "effectcraft-time",
+ "effectcraft-color 0.21.0",
+ "effectcraft-geom 0.21.0",
+ "effectcraft-keyframe 0.21.0",
+ "effectcraft-time 0.21.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "effectcraft-project"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "craft-ecproj-format",
+ "effectcraft-color 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-geom 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-keyframe 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-time 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1824,11 +2004,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "effectcraft-psd"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "miniz_oxide 0.9.1",
+]
+
+[[package]]
 name = "effectcraft-raster"
 version = "0.21.0"
 dependencies = [
- "effectcraft-color",
- "effectcraft-geom",
+ "effectcraft-color 0.21.0",
+ "effectcraft-geom 0.21.0",
+ "rayon",
+]
+
+[[package]]
+name = "effectcraft-raster"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "effectcraft-color 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-geom 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "rayon",
 ]
 
@@ -1836,16 +2034,39 @@ dependencies = [
 name = "effectcraft-render"
 version = "0.21.0"
 dependencies = [
- "effectcraft-color",
- "effectcraft-effects",
- "effectcraft-geom",
- "effectcraft-keyframe",
- "effectcraft-model",
- "effectcraft-path",
- "effectcraft-project",
- "effectcraft-raster",
- "effectcraft-text",
- "effectcraft-time",
+ "effectcraft-color 0.21.0",
+ "effectcraft-effects 0.21.0",
+ "effectcraft-geom 0.21.0",
+ "effectcraft-keyframe 0.21.0",
+ "effectcraft-model 0.21.0",
+ "effectcraft-path 0.21.0",
+ "effectcraft-project 0.21.0",
+ "effectcraft-raster 0.21.0",
+ "effectcraft-text 0.21.0",
+ "effectcraft-time 0.21.0",
+ "kurbo",
+ "log",
+ "lz4_flex",
+ "rayon",
+ "serde",
+ "web-time",
+]
+
+[[package]]
+name = "effectcraft-render"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "effectcraft-color 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-effects 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-geom 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-keyframe 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-model 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-path 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-project 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-raster 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-text 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-time 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "kurbo",
  "log",
  "lz4_flex",
@@ -1861,7 +2082,23 @@ dependencies = [
  "bytemuck",
  "candle-core",
  "candle-nn",
- "effectcraft-segment",
+ "effectcraft-segment 0.21.0",
+ "half",
+ "log",
+ "pollster 1.0.1",
+ "rayon",
+ "wgpu",
+]
+
+[[package]]
+name = "effectcraft-sam2"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "bytemuck",
+ "candle-core",
+ "candle-nn",
+ "effectcraft-segment 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "half",
  "log",
  "pollster 1.0.1",
@@ -1874,14 +2111,14 @@ name = "effectcraft-script"
 version = "0.21.0"
 dependencies = [
  "boa_engine",
- "effectcraft-engine",
+ "effectcraft-engine 0.21.0",
  "effectcraft-expr",
- "effectcraft-keyframe",
- "effectcraft-path",
- "effectcraft-project",
- "effectcraft-psd",
- "effectcraft-render",
- "effectcraft-time",
+ "effectcraft-keyframe 0.21.0",
+ "effectcraft-path 0.21.0",
+ "effectcraft-project 0.21.0",
+ "effectcraft-psd 0.21.0",
+ "effectcraft-render 0.21.0",
+ "effectcraft-time 0.21.0",
  "serde_json",
  "socket2",
  "web-time",
@@ -1897,12 +2134,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "effectcraft-segment"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "miniz_oxide 0.9.1",
+ "ndarray",
+ "rayon",
+]
+
+[[package]]
 name = "effectcraft-svg"
 version = "0.21.0"
 dependencies = [
- "effectcraft-geom",
- "effectcraft-path",
- "effectcraft-raster",
+ "effectcraft-geom 0.21.0",
+ "effectcraft-path 0.21.0",
+ "effectcraft-raster 0.21.0",
+ "kurbo",
+ "rayon",
+ "roxmltree",
+]
+
+[[package]]
+name = "effectcraft-svg"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "effectcraft-geom 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-path 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-raster 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "kurbo",
  "rayon",
  "roxmltree",
@@ -1912,7 +2172,20 @@ dependencies = [
 name = "effectcraft-text"
 version = "0.21.0"
 dependencies = [
- "effectcraft-keyframe",
+ "effectcraft-keyframe 0.21.0",
+ "harfrust",
+ "kurbo",
+ "skrifa",
+ "unicode-bidi",
+ "unicode-linebreak",
+]
+
+[[package]]
+name = "effectcraft-text"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "effectcraft-keyframe 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "harfrust",
  "kurbo",
  "skrifa",
@@ -1929,11 +2202,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "effectcraft-time"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "effectcraft-track"
 version = "0.21.0"
 dependencies = [
- "effectcraft-raster",
- "effectcraft-segment",
+ "effectcraft-raster 0.21.0",
+ "effectcraft-segment 0.21.0",
+ "rayon",
+ "serde",
+ "serde_json",
+ "web-time",
+]
+
+[[package]]
+name = "effectcraft-track"
+version = "0.21.0"
+source = "git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b#7870b5916ae0749d497d880989683bf2946d6c8b"
+dependencies = [
+ "effectcraft-raster 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-segment 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
  "rayon",
  "serde",
  "serde_json",
@@ -1949,18 +2243,19 @@ dependencies = [
  "craft-quit",
  "craft-ui",
  "craft-update",
- "effectcraft-color",
- "effectcraft-engine",
- "effectcraft-geom",
+ "effectcraft-color 0.21.0",
+ "effectcraft-engine 0.21.0",
+ "effectcraft-engine 0.21.0 (git+https://github.com/storytold/effectcraft?rev=7870b5916ae0749d497d880989683bf2946d6c8b)",
+ "effectcraft-geom 0.21.0",
  "effectcraft-gpu",
  "effectcraft-host",
- "effectcraft-keyframe",
- "effectcraft-path",
- "effectcraft-project",
- "effectcraft-render",
- "effectcraft-segment",
- "effectcraft-text",
- "effectcraft-time",
+ "effectcraft-keyframe 0.21.0",
+ "effectcraft-path 0.21.0",
+ "effectcraft-project 0.21.0",
+ "effectcraft-render 0.21.0",
+ "effectcraft-segment 0.21.0",
+ "effectcraft-text 0.21.0",
+ "effectcraft-time 0.21.0",
  "eframe",
  "egui",
  "egui_kittest",
@@ -1969,6 +2264,7 @@ dependencies = [
  "kurbo",
  "log",
  "pollster 1.0.1",
+ "proptest",
  "rayon",
  "serde",
  "serde_json",
@@ -1985,7 +2281,7 @@ version = "0.21.0"
 name = "effectcraft-web"
 version = "0.21.0"
 dependencies = [
- "effectcraft-engine",
+ "effectcraft-engine 0.21.0",
  "effectcraft-export",
  "effectcraft-expr",
  "effectcraft-gpu",

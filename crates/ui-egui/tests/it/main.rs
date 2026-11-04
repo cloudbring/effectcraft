@@ -1,6 +1,7 @@
 //! The crate's integration tests, one binary (each module is a former `tests/<name>.rs`).
 
 mod gpu_test;
+mod keymap_oracle;
 mod native_menu_text_keys;
 mod render_queue_snapshot;
 mod roto_model_guard;
