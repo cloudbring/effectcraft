@@ -47,7 +47,8 @@ fn chord_bindings(session: &effectcraft_engine::Session) -> Vec<(Chord, String, 
 /// `Physical+`-only bindings never match here, exactly as for the app-wide dispatcher.
 pub fn chord_matches(session: &effectcraft_engine::Session, command: &str, key: egui::Key, mods: egui::Modifiers) -> bool {
     let platform = session.shortcuts().platform();
-    chord_bindings(session).iter().any(|(c, id, _)| id == command && craft_keymap::egui::matches(c, key, &mods, platform))
+    // Only the tightest matches count, so a `=` binding does not claim the Shift+= press of a Shift+= binding.
+    craft_keymap::egui::best_matches(chord_bindings(session), |(c, ..)| c, key, &mods, platform).iter().any(|(_, id, _)| id == command)
 }
 
 /// Whether a Deselect All or Duplicate chord matched by [`chord_matches`] may run while a text
@@ -356,9 +357,10 @@ fn handle_shortcuts_impl(app: &mut EffectcraftApp, ctx: &egui::Context, tab_only
             let same = physical_key.and_then(Key::from_egui) == Some(chord.key) && Mods::from_egui(&mods, platform) == chord.mods;
             same.then_some((b.scope.as_str(), true, (&b.command.id, &b.command.params)))
         });
-        let logical = binds
-            .iter()
-            .filter(|(c, ..)| craft_keymap::egui::matches(c, key, &mods, platform))
+        // Only the tightest-matching bindings compete on scope: `=` matches the Shift+= press too, but must
+        // not shadow a Shift+= binding of a wider scope.
+        let logical = craft_keymap::egui::best_matches(binds.iter(), |(c, ..)| c, key, &mods, platform)
+            .into_iter()
             .map(|(_, id, params)| (scope_of(id, params), false, (id, params)));
         let chosen = match effectcraft_engine::shortcuts::pick(physical.chain(logical), &focused, &contexts) {
             Ok(c) => c.map(|(id, params)| (id.clone(), if params.is_null() { json!({}) } else { params.clone() })),

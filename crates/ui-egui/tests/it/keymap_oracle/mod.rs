@@ -196,10 +196,8 @@ impl NewSide {
             let same = Key::from_egui(key) == Some(chord.key) && Mods::from_egui(&mods, platform) == chord.mods;
             same.then_some((b.scope.as_str(), true, (b.command.id.clone(), b.command.params.clone())))
         });
-        let logical = self
-            .binds
-            .iter()
-            .filter(|(c, ..)| craft_keymap::egui::matches(c, key, &mods, platform))
+        let logical = craft_keymap::egui::best_matches(self.binds.iter(), |(c, ..)| c, key, &mods, platform)
+            .into_iter()
             .map(|(_, id, params)| (scope_of(id, params), false, (id.clone(), params.clone())));
         new::pick(physical.chain(logical), focused, contexts).map(|c| c.map(|(id, p)| (id, norm_params(&p))))
     }
@@ -257,7 +255,7 @@ fn assert_equivalent(label: &str, om: &old::Keymaps, nm: &new::Keymaps, grid: bo
         let registered = remove_registered(&mut got, p, label);
         assert!(got.is_empty(), "{label} {p:?}: {} unregistered differing presses\n{}", got.len(), render_diffs(&got));
         if label == "default" {
-            assert_eq!(registered, 3, "{label} {p:?}: the default table has exactly the 3 registered differences");
+            assert_eq!(registered, 2, "{label} {p:?}: the default table has exactly the 2 registered differences");
         }
     }
 }
@@ -312,11 +310,7 @@ const LAYOUT_TOLERANT: &[egui::Key] = &[
 ///   1. `Alt+Shift+!` (Alt+Shift+1 on a US keyboard) runs `view.channel.redColorized`; OLD ran nothing
 ///      because egui reports `!`, not `1`. A fix.
 ///   2. A bare `+` runs `timeline.zoomIn` (the `=` binding); OLD ran nothing. A fix.
-///   3. `Shift+=` (reported as Shift+`+`) with the Timeline or Composition focused runs
-///      `timeline.zoomIn`; OLD ran `layer.setBlendMode {step: 1}` (After Effects' "next blend mode").
-///      A behaviour change that loses a default shortcut in those two panels; see the ignored test
-///      `shift_equals_next_blend_mode_in_timeline_regressed`.
-///   4. Off macOS a plain `Ctrl+..` chord is dead in OLD and is the same chord as `Cmd+..` in NEW.
+///   3. Off macOS a plain `Ctrl+..` chord is dead in OLD and is the same chord as `Cmd+..` in NEW.
 ///
 /// Returns how many distinct presses were registered and removed from `d`.
 fn remove_registered(d: &mut Diffs, p: Profile, label: &str) -> usize {
@@ -325,11 +319,7 @@ fn remove_registered(d: &mut Diffs, p: Profile, label: &str) -> usize {
         let registered = |line: &str| match press.as_str() {
             "Exclamationmark ctrl=false shift=true alt=true meta/cmd=false" => line.ends_with(": (nothing) -> view.channel.redColorized {}"),
             "Plus ctrl=false shift=false alt=false meta/cmd=false" => line.ends_with(": (nothing) -> timeline.zoomIn {}"),
-            "Plus ctrl=false shift=true alt=false meta/cmd=false" => {
-                (line.starts_with("focus=Timeline:") || line.starts_with("focus=Composition:"))
-                    && line.ends_with(": layer.setBlendMode {\"step\":1} -> timeline.zoomIn {}")
-            }
-            // 4. A plain `Ctrl+..` chord off macOS: OLD never matched it (a Windows Ctrl press also sets
+            // 3. A plain `Ctrl+..` chord off macOS: OLD never matched it (a Windows Ctrl press also sets
             //    `command`, which `mods_match` requires to be false for `Ctrl`), NEW reads Ctrl as Cmd. The
             //    legacy fixture's `Ctrl+Alt+Y` (layer.newNull) now wins over the default `Cmd+Alt+Y`.
             "Y ctrl=true shift=false alt=true meta/cmd=true" if !p.mac() && label.starts_with("legacy") => {
@@ -347,17 +337,19 @@ fn remove_registered(d: &mut Diffs, p: Profile, label: &str) -> usize {
     n
 }
 
-/// `Shift+=` is After Effects' "next blend mode" (`layer.setBlendMode`), and it was one in OLD
-/// with the Timeline or Composition focused. NEW's tolerant matcher lets the `=` zoom binding of
-/// those panels claim it first. This is the regression half of difference 3; it fails today.
+/// `Shift+=` is After Effects' "next blend mode" (`layer.setBlendMode`), and it was one in OLD with the
+/// Timeline or Composition focused. `craft_keymap::egui::matches` is tolerant, so those panels' `=` zoom
+/// binding also matches the press; `best_matches` keeps only the tightest match, which is the exact
+/// `Shift+=` binding. This was a registered regression of the craft-keymap swap (#209).
 #[test]
-#[ignore = "known regression of the craft-keymap swap, see remove_registered docs (difference 3)"]
-fn shift_equals_next_blend_mode_in_timeline_regressed() {
+fn shift_equals_runs_next_blend_mode_in_timeline_and_composition() {
     for p in PROFILES {
         let (o, n) = (OldSide::new(&old::Keymaps::default(), p), NewSide::new(&new::Keymaps::default(), p));
         let pressed = (egui::Key::Plus, pressed_mods(p, false, true, false, false));
         for focus in ["Timeline", "Composition"] {
-            assert_eq!(o.resolve(pressed, focus, &[]), n.resolve(pressed, focus, &[]), "{p:?} focus={focus}");
+            let (old, new) = (o.resolve(pressed, focus, &[]), n.resolve(pressed, focus, &[]));
+            assert_eq!(old, new, "{p:?} focus={focus}");
+            assert_eq!(new.unwrap().unwrap().0, "layer.setBlendMode", "{p:?} focus={focus}");
         }
     }
 }

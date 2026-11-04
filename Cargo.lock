@@ -1135,7 +1135,7 @@ dependencies = [
 [[package]]
 name = "craft-keymap"
 version = "0.1.0"
-source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#5ac933bbe92d82a587a5c48ce135fa1d4d14b423"
+source = "git+https://github.com/cloudbring/craft-libs?rev=93f2120a3a5584fb1b1305388c7facc1488aa13e#93f2120a3a5584fb1b1305388c7facc1488aa13e"
 dependencies = [
  "craft-i18n",
  "craft-ui",
