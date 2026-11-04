@@ -507,6 +507,6 @@ fn work_area_navigation_has_after_effects_default_keys() {
     let s = Session::default();
     for (id, key) in [("time.workAreaStart", "Shift+Home"), ("time.workAreaEnd", "Shift+End")] {
         let b = s.shortcuts().find(id).unwrap_or_else(|| panic!("{id} is bindable"));
-        assert_eq!(b.defaults, [key.to_string()], "{id}");
+        assert_eq!(b.defaults.iter().map(ToString::to_string).collect::<Vec<_>>(), [key.to_string()], "{id}");
     }
 }

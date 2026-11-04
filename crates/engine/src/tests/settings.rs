@@ -434,7 +434,7 @@ fn defaults_have_no_conflicts_and_match_the_menus() {
     assert!(t.all_conflicts().is_empty(), "{:?}", t.all_conflicts());
     assert_eq!(t.shortcut_of("file.save", &json!(null)), Some("Cmd+S"));
     assert_eq!(t.shortcut_of("app.settings", &json!({"page": "general"})), Some("Cmd+Alt+;"));
-    assert!(t.bindables.len() > 500);
+    assert!(t.catalog().len() > 500);
 }
 
 /// Each Fast Previews and Show Channel mode is a command with a default key.
@@ -507,12 +507,12 @@ fn second_default_keys() {
     let t = s.shortcuts();
     for (key, want) in [
         ("edit.deselectAll", ["Cmd+Shift+A", "F2"]),
-        ("time.start", ["Home", "Cmd+Alt+ArrowLeft"]),
-        ("time.end", ["End", "Cmd+Alt+ArrowRight"]),
+        ("time.start", ["Home", "Cmd+Alt+Left"]),
+        ("time.end", ["End", "Cmd+Alt+Right"]),
         ("renderQueue.add", ["Cmd+M", "Cmd+Shift+/"]),
         (r#"window.panel {"panel":"effectControls"}"#, ["F3", "Cmd+Shift+T"]),
     ] {
-        assert_eq!(t.keys.get(key).map(Vec::as_slice), Some(want.map(String::from).as_slice()), "{key}");
+        assert_eq!(t.keys_of(key), want.map(String::from), "{key}");
     }
     // The menus keep showing the first key.
     assert_eq!(t.shortcut_of("window.panel", &json!({"panel": "effectControls"})), Some("F3"));
@@ -526,12 +526,12 @@ fn cmd_arrows_step_frames_like_page_keys() {
     let s = Session::default();
     let t = s.shortcuts();
     for (id, keys) in [
-        ("time.nextFrame", ["PageDown", "Cmd+ArrowRight"]),
-        ("time.previousFrame", ["PageUp", "Cmd+ArrowLeft"]),
-        ("time.forward10", ["Shift+PageDown", "Cmd+Shift+ArrowRight"]),
-        ("time.back10", ["Shift+PageUp", "Cmd+Shift+ArrowLeft"]),
+        ("time.nextFrame", ["PageDown", "Cmd+Right"]),
+        ("time.previousFrame", ["PageUp", "Cmd+Left"]),
+        ("time.forward10", ["Shift+PageDown", "Cmd+Shift+Right"]),
+        ("time.back10", ["Shift+PageUp", "Cmd+Shift+Left"]),
     ] {
-        assert_eq!(t.keys.get(id).map(Vec::as_slice), Some(keys.map(String::from).as_slice()), "{id}");
+        assert_eq!(t.keys_of(id), keys.map(String::from), "{id}");
         // The menus and tooltips keep showing the Page key.
         assert_eq!(t.shortcut_of(id, &json!(null)), Some(keys[0]));
     }
@@ -546,7 +546,7 @@ fn shortcut_edits_detect_conflicts_and_create_a_custom_preset() {
     assert_eq!(r["keys"], json!(["Cmd+S"]));
     assert_eq!(r["created"], json!("Custom"));
     assert!(r["conflicts"].as_array().unwrap().iter().any(|c| c["key"] == "file.save"), "{r}");
-    assert_eq!(s.keymaps.active, "Custom");
+    assert_eq!(s.keymaps.active_name(), "Custom");
     assert_eq!(s.shortcuts().shortcut_of("layer.newNull", &json!(null)), Some("Cmd+S"));
     assert!(!s.execute("shortcuts.conflicts", json!({})).unwrap().as_array().unwrap().is_empty());
     // The default preset is untouched.
@@ -563,7 +563,7 @@ fn shortcut_edits_detect_conflicts_and_create_a_custom_preset() {
     assert_eq!(s.shortcuts().shortcut_of("app.settings", &json!({"page": "labels"})), Some("F9"));
     // Persisted.
     let k = Keymaps::from_json(&store.read(crate::shortcuts::SHORTCUTS_FILE).unwrap());
-    assert_eq!(k.active, "Custom");
+    assert_eq!(k.active_name(), "Custom");
     assert!(s.execute("shortcuts.set", json!({"command": "no.such", "keys": "F1"})).is_err());
     assert!(s.execute("shortcuts.set", json!({"command": "file.save", "keys": "Cmd+"})).is_err());
     let list = s.execute("shortcuts.list", json!({"keys": "F9"})).unwrap();
@@ -584,12 +584,12 @@ fn shortcut_presets_duplicate_rename_delete_export_import() {
     s.execute("shortcuts.export", json!({"preset": "Mine", "path": path.to_string_lossy()})).unwrap();
     s.execute("shortcuts.preset", json!({"op": "delete", "name": "Mine"})).unwrap();
     s.execute("shortcuts.preset", json!({"op": "delete", "name": "Other"})).unwrap();
-    assert_eq!(s.keymaps.active, DEFAULT_PRESET);
+    assert_eq!(s.keymaps.active_name(), DEFAULT_PRESET);
     let r = s.execute("shortcuts.import", json!({"path": path.to_string_lossy()})).unwrap();
     assert_eq!(r["preset"], json!("Mine"));
-    assert_eq!(s.shortcuts().keys["edit.undo"], vec!["Cmd+Z".to_string(), "F2".into()]);
+    assert_eq!(s.shortcuts().keys_of("edit.undo"), vec!["Cmd+Z".to_string(), "F2".into()]);
     s.execute("shortcuts.reset", json!({})).unwrap();
-    assert_eq!(s.shortcuts().keys["edit.undo"], vec!["Cmd+Z".to_string()]);
+    assert_eq!(s.shortcuts().keys_of("edit.undo"), vec!["Cmd+Z".to_string()]);
     let _ = std::fs::remove_dir_all(d);
 }
 
@@ -601,13 +601,13 @@ fn frontend_commands_are_bindable_with_panel_scope() {
         crate::shortcuts::UiCommand { id: "tool.hand".into(), label: "Hand Tool".into(), shortcut: Some("H".into()), scope: None },
     ]);
     let b = s.shortcuts().find("timeline.zoomIn").unwrap().clone();
-    assert_eq!(b.scope, "Timeline");
+    assert_eq!(b.scope.as_str(), "Timeline");
     assert_eq!(s.shortcuts().shortcut_of("tool.hand", &json!(null)), Some("H"));
     // A panel shortcut conflicts with an application shortcut on the same keys.
     let c = s.shortcuts().conflicts(&b, "H");
     assert!(c.iter().any(|c| c.key == "tool.hand"));
     // A registry command that only the Project panel runs is scoped to it.
-    assert_eq!(s.shortcuts().find("project.deleteWithoutConfirmation").unwrap().scope, "Project");
+    assert_eq!(s.shortcuts().find("project.deleteWithoutConfirmation").unwrap().scope.as_str(), "Project");
 }
 
 /// The binding that runs a key press: the narrowest scope; a physical binding at the same rank;
@@ -649,6 +649,106 @@ fn context_shortcuts_on_the_same_keys_conflict() {
     assert!(t.all_conflicts().iter().any(|(a, c)| a == "test.mask" && c.key == "test.paint" && !c.overrides), "{:?}", t.all_conflicts());
     let b = t.find("test.mask").unwrap();
     assert!(t.conflicts(b, "F9").iter().any(|c| c.key == "test.paint" && !c.overrides));
+}
+
+#[test]
+fn lookup_identity_across_default_bindings_on_mac_and_windows() {
+    use crate::shortcuts::{Keymaps, ShortcutTable, binding_key, is_context, normalize, scope_of};
+    use craft_keymap::{Active, Lookup, Platform};
+
+    for platform in [Platform::Mac, Platform::Windows] {
+        let mut legacy: std::collections::BTreeMap<String, (String, Vec<String>)> = std::collections::BTreeMap::new();
+        let keep = |raw: &str| -> Option<String> {
+            let n = normalize(raw)?;
+            if !platform.is_mac() && n.contains("Cmd+Ctrl+") { None } else { Some(n) }
+        };
+        let mut add = |key: String, sc: String, defaults: Vec<String>| {
+            let entry = legacy.entry(key).or_insert_with(|| (sc, Vec::new()));
+            for d in defaults {
+                if !entry.1.contains(&d) {
+                    entry.1.push(d);
+                }
+            }
+        };
+        let entries = crate::menus::entries();
+        for (_, e) in &entries {
+            let key = binding_key(&e.command, &e.params);
+            let alt = if e.params.is_null() { crate::commands::find(&e.command).map_or(&[][..], |c| c.alt_shortcuts) } else { &[] };
+            let defs =
+                e.shortcut.as_deref().into_iter().chain(e.alt_shortcuts.iter().map(String::as_str)).chain(alt.iter().copied()).filter_map(keep).collect();
+            add(key.clone(), scope_of(&key).into(), defs);
+        }
+        let recent_key = binding_key("file.runScript", &json!({"recent": 0}));
+        add(recent_key, "Application".into(), vec!["Cmd+Alt+Shift+D".into()]);
+        for c in crate::command_specs() {
+            if !c.journal || entries.iter().any(|(_, e)| e.command == c.id) {
+                continue;
+            }
+            let defs = c.shortcut.into_iter().chain(c.alt_shortcuts.iter().copied()).filter_map(keep).collect();
+            add(c.id.into(), scope_of(c.id).into(), defs);
+        }
+
+        let table = ShortcutTable::build_for_platform(&Keymaps::default(), &[], &[], platform);
+        assert!(table.all_conflicts().is_empty(), "{platform:?}: {:?}", table.all_conflicts());
+        assert_eq!(table.catalog().len(), legacy.len(), "{platform:?}");
+
+        for (key, (scope, want_keys)) in &legacy {
+            let b = table.find(key).unwrap_or_else(|| panic!("{platform:?}: missing {key}"));
+            assert_eq!(&table.keys_of(key), want_keys, "{platform:?}: {key}");
+            assert_eq!(b.scope.as_str(), scope.as_str(), "{platform:?}: {key}");
+            for binding in table.keymap.bindings(&b.command) {
+                let eff = binding.trigger.effective(platform);
+                let s_name = binding.scope_or(&b.scope).as_str();
+                let ctx_slice = [s_name];
+                let active = if is_context(s_name) {
+                    Active { panel: Some("Composition"), contexts: &ctx_slice, typing: false }
+                } else if s_name == "Application" {
+                    Active { panel: Some("Timeline"), contexts: &[], typing: false }
+                } else {
+                    Active { panel: Some(s_name), contexts: &[], typing: false }
+                };
+                assert_eq!(table.keymap.lookup(&eff.chord, eff.double, &active), Lookup::Run(b.command.clone()), "{platform:?}: {key} on {eff}");
+            }
+        }
+    }
+}
+
+#[test]
+fn legacy_shortcuts_json_migrates_over_64_presets_and_long_names() {
+    let long_name = "Preset-".to_string() + &"X".repeat(93);
+    assert_eq!(long_name.len(), 100);
+    let mut presets = vec![json!({"name": DEFAULT_PRESET, "overrides": {}})];
+    for i in 0..70 {
+        let name = if i == 42 { long_name.clone() } else { format!("Custom Preset {i}") };
+        presets.push(json!({
+            "name": name,
+            "overrides": {
+                "file.save": [format!("Ctrl+Shift+F{}", (i % 12) + 1)],
+                "comp.addMarker": ["Num*"],
+            }
+        }));
+    }
+    let legacy = json!({
+        "active": long_name,
+        "presets": presets,
+    })
+    .to_string();
+
+    let km = Keymaps::from_json(&legacy);
+    assert!(km.profiles.problems().is_empty(), "{:?}", km.profiles.problems());
+    assert_eq!(km.names().len(), 71, "default + 70 user presets survive");
+    assert_eq!(km.active_name(), long_name);
+    assert_eq!(km.profiles.display_name(km.active_name()), long_name);
+    assert_eq!(km.active_overrides().get("comp.addMarker"), Some(&["KeypadMultiply".to_string()][..]));
+
+    let saved = km.to_json();
+    let v: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(v["version"], 1);
+    assert!(v.get("sets").and_then(serde_json::Value::as_array).is_some_and(|a| a.len() == 70));
+    let roundtrip = Keymaps::from_json(&saved);
+    assert!(roundtrip.profiles.problems().is_empty());
+    assert_eq!(roundtrip.names().len(), 71);
+    assert_eq!(roundtrip.profiles.display_name(roundtrip.active_name()), long_name);
 }
 
 // ---------------------------------------------------------------- auto-save / recovery
@@ -1247,4 +1347,36 @@ fn gpu_summary_names_the_adapter_or_says_why_there_is_none() {
     let on = gpu_summary(&s);
     assert!(on.starts_with("Compositing: GPU, NVIDIA GeForce RTX 4070 (Vulkan)."), "{on}");
     assert!(!on.contains("compositing is off"), "{on}");
+}
+
+/// A `shortcuts.json` saved before `craft-keymap` (`{active, presets:[{name, overrides}]}`, key
+/// text in any case or order) loads with the same bindings, and saves in the new format.
+#[test]
+fn saved_presets_in_the_old_format_keep_their_bindings() {
+    let mut s = Session { keymaps: Keymaps::from_json(include_str!("fixtures/shortcuts_v0_legacy.json")), ..Default::default() };
+    s.shortcuts_changed();
+    assert_eq!(s.keymaps.active_name(), "Mine");
+    assert_eq!(s.keymaps.names(), [DEFAULT_PRESET, "Mine", "Other"]);
+    let t = s.shortcuts();
+    // Each override as the old loader would have bound it: normalized text, in order.
+    for (key, want) in [
+        ("file.save", vec!["Cmd+Shift+K"]),
+        ("layer.newNull", vec!["F6", "Ctrl+Alt+Y"]),
+        ("edit.undo", vec!["Cmd+Z", "F2"]),
+        ("tool.hand", vec!["Physical+Alt+H"]),
+        ("edit.clear", vec![]),
+    ] {
+        assert_eq!(t.keys_of(key), want, "{key}");
+    }
+    // The numpad key keeps running Add Marker.
+    assert!(t.bindings().iter().any(|(k, b)| b.command.id == "comp.addMarker" && k.contains("Multiply")), "{:?}", t.keys_of("comp.addMarker"));
+    // Untouched commands keep the default keys, and the other preset applies once selected.
+    assert_eq!(t.keys_of("file.close"), Session::default().shortcuts().keys_of("file.close"));
+    s.execute("shortcuts.preset", json!({"op": "select", "name": "Other"})).unwrap();
+    assert_eq!(s.shortcuts().keys_of("file.open"), vec!["Cmd+Alt+O"]);
+    assert_eq!(s.shortcuts().keys_of("file.save"), vec!["Cmd+S"]);
+    // Saved again, it is the new format and reads back the same.
+    let saved = s.keymaps.to_json();
+    assert!(serde_json::from_str::<serde_json::Value>(&saved).unwrap().get("sets").is_some(), "{saved}");
+    assert_eq!(Keymaps::from_json(&saved), s.keymaps);
 }

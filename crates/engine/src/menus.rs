@@ -74,7 +74,7 @@ fn dyn_entry(label: String, command: &str, params: Value) -> MenuEntry {
 /// The bindable holding shortcut `keys` in the active preset (its label).
 fn holder_of(s: &Session, keys: &str) -> Option<String> {
     let t = s.shortcuts();
-    t.bindables.iter().find(|b| t.keys.get(&b.key).is_some_and(|k| k.iter().any(|k| k == keys))).map(|b| b.label.clone())
+    t.catalog().iter().find(|b| t.keys_of(&b.command.key()).iter().any(|k| k == keys)).map(|b| b.label.clone())
 }
 
 /// The entries of a `@dynamic:<name>` node, and the disabled placeholder shown when there are

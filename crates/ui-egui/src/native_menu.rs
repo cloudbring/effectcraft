@@ -367,11 +367,12 @@ pub fn state_key(app: &EffectcraftApp) -> u64 {
     s.active_comp_id().and_then(|c| s.state.views3d.get(&c)).map(|v| format!("{:?}", v.current)).hash(&mut h);
     // Each binding's keys: a key changed to another one gives the item a new accelerator.
     let shortcuts = s.shortcuts();
-    for b in &shortcuts.bindables {
-        b.key.hash(&mut h);
-        shortcuts.keys.get(&b.key).hash(&mut h);
+    for b in shortcuts.catalog() {
+        let key = b.command.key();
+        shortcuts.keys_of(&key).hash(&mut h);
+        key.hash(&mut h);
     }
-    s.keymaps.active.hash(&mut h);
+    s.keymaps.active_name().hash(&mut h);
     let v = &app.ui.viewer;
     (v.rulers, v.guides, v.snap_guides, v.lock_guides, v.grid, v.snap_grid, v.show_layer_controls, v.pasteboard).hash(&mut h);
     (app.ui.cache_when_idle, app.session.prefs.preview.active().include_audio, &app.ui.workspace, app.dialog.is_some()).hash(&mut h);

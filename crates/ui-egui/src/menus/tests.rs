@@ -53,7 +53,7 @@ fn full_screen_default_is_platform_specific() {
     let app = EffectcraftApp::new(effectcraft_engine::Session::default());
     let full_screen = app.session.shortcuts().shortcut_of("view.fullScreen", &Value::Null);
     if cfg!(target_os = "macos") {
-        assert_eq!(full_screen, Some("Ctrl+Cmd+F"));
+        assert_eq!(full_screen, Some("Cmd+Ctrl+F"));
     } else {
         assert_eq!(full_screen, None);
         assert_eq!(app.session.shortcuts().shortcut_of("window.maximizeApp", &Value::Null), Some("Cmd+\\"));
@@ -236,7 +236,7 @@ fn dispatch_uses_the_active_custom_preset() {
     assert!(find(&app, "layer.newNull").contains(&(m, k)));
     // A UI command rebound in a custom preset.
     app.session.execute("shortcuts.set", json!({"command": "tool.hand", "keys": "Ctrl+Alt+H"})).unwrap();
-    assert_eq!(app.session.keymaps.active, "Custom");
+    assert_eq!(app.session.keymaps.active_name(), "Custom");
     let (m2, k2) = parse_shortcut("Ctrl+Alt+H").unwrap();
     assert_eq!(find(&app, "tool.hand"), vec![(m2, k2)]);
     app.session.execute("shortcuts.set", json!({"command": "layer.newNull", "keys": "F6"})).unwrap();

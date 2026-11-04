@@ -539,7 +539,6 @@ pub(crate) fn press_key(app: &mut EffectcraftApp, ctx: &egui::Context, key: egui
 pub(crate) fn command_key(app: &EffectcraftApp) -> Option<egui::Key> {
     match app.dialog? {
         Dialog::DeleteItems | Dialog::DeleteTemplate => Some(egui::Key::D),
-        Dialog::Shortcuts if super::shortcut_editor::confirming(app) => Some(egui::Key::D),
         Dialog::UnsavedChanges if super::unsaved::is_revert(app) => Some(egui::Key::R),
         _ => None,
     }

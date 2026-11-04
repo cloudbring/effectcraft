@@ -1083,7 +1083,9 @@ mod tests {
         std::fs::write(&script, "hello").unwrap();
         std::fs::write(&panel, "panel").unwrap();
         let listed = |s: &Session, name: &str| {
-            s.shortcuts().find(&binding_key("file.runScript", &json!({"name": name}))).map(|b| (b.label.clone(), b.path.join(" ▸ "), b.defaults.clone()))
+            s.shortcuts().find(&binding_key("file.runScript", &json!({"name": name}))).map(|b| {
+                (b.label.clone(), b.paths.first().cloned().unwrap_or_default().join(" ▸ "), b.defaults.iter().map(ToString::to_string).collect::<Vec<_>>())
+            })
         };
         assert_eq!(listed(&s, "Rename Layers.jsx"), Some(("Rename Layers.jsx".into(), "File ▸ Scripts".into(), vec![])), "the bundled samples");
         assert_eq!(listed(&s, "Hello.jsx"), None);
@@ -1096,7 +1098,7 @@ mod tests {
         assert_eq!((&r["command"], &r["keys"]), (&json!(key), &json!(["Cmd+Alt+Shift+F7"])), "{r}");
         assert_eq!(s.shortcuts().shortcut_of("file.runScript", &json!({"name": "Hello.jsx"})), Some("Cmd+Alt+Shift+F7"));
         let saved = Keymaps::from_json(&std::fs::read_to_string(root.join("settings").join(SHORTCUTS_FILE)).unwrap());
-        assert_eq!(saved.active_preset().and_then(|p| p.overrides.get(&key)), Some(&vec!["Cmd+Alt+Shift+F7".to_string()]));
+        assert_eq!(saved.active_overrides().get(&key), Some(&["Cmd+Alt+Shift+F7".to_string()][..]));
         s.execute("file.uninstallScript", json!({"name": "Hello.jsx"})).unwrap();
         assert_eq!(listed(&s, "Hello.jsx"), None);
         let _ = std::fs::remove_dir_all(&root);

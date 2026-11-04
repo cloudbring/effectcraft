@@ -1,0 +1,14 @@
+{
+  "active": "Mine",
+  "presets": [
+    { "name": "Mine", "overrides": {
+        "file.save": ["shift+cmd+k"],
+        "layer.newNull": ["F6", "Ctrl+Alt+Y"],
+        "edit.undo": ["Cmd+Z", "F2"],
+        "comp.addMarker": ["Num*"],
+        "tool.hand": ["Physical+Alt+H"],
+        "edit.clear": []
+    } },
+    { "name": "Other", "overrides": { "file.open": ["Cmd+Alt+O"] } }
+  ]
+}

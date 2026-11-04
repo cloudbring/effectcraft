@@ -2,131 +2,43 @@ use super::frontend::run_engine;
 use super::invoke::invoke;
 use super::{EffectcraftApp, PanelKind, Value, json};
 use crate::state::Tool;
+use craft_keymap::{Chord, Key, Mods, Platform, Trigger};
 
 /// Shortcut text in this OS's notation (`⇧⌘K` on macOS, `Ctrl+Shift+K` elsewhere).
 pub fn shortcut_text(s: &str) -> String {
-    if cfg!(target_os = "macos") {
-        let mut out = String::new();
-        let parts: Vec<&str> = match s.strip_suffix("++") {
-            Some(head) => vec![head, "+"],
-            None => s.split('+').collect(),
-        };
-        let (mods, key) = parts.split_at(parts.len().saturating_sub(1));
-        for m in mods {
-            out.push_str(match *m {
-                "Ctrl" => "⌃",
-                "Alt" => "⌥",
-                "Shift" => "⇧",
-                "Cmd" => "⌘",
-                x => x,
-            });
-        }
-        out.push_str(match key.first().copied().unwrap_or("") {
-            "Space" => "Space",
-            "Escape" => "Esc",
-            "Home" => "↖",
-            k => k,
-        });
-        out
-    } else {
-        s.replace("Cmd", "Ctrl")
-    }
+    Trigger::parse(strip_physical(s)).map_or_else(|_| s.to_string(), |t| t.display(Platform::current()))
+}
+
+fn strip_physical(s: &str) -> &str {
+    s.strip_prefix("Physical+").unwrap_or(s)
 }
 
 /// Parse "Cmd+Shift+K" into modifiers + key.
 pub fn parse_shortcut(s: &str) -> Option<(egui::Modifiers, egui::Key)> {
-    let mut m = egui::Modifiers::NONE;
-    let mut key = None;
-    // The plus key itself is written `+` or `Cmd++`.
-    let (head, plus) = match s.strip_suffix("++") {
-        Some(h) => (h, true),
-        None if s == "+" => ("", true),
-        None => (s, false),
-    };
-    let mut parts: Vec<&str> = if head.is_empty() { vec![] } else { head.split('+').collect() };
-    if plus {
-        parts.push("+");
-    }
-    for p in parts {
-        match p {
-            "Cmd" => {
-                m.command = true;
-                m.mac_cmd = cfg!(target_os = "macos");
-                if !cfg!(target_os = "macos") {
-                    m.ctrl = true;
-                }
-            }
-            "Physical" => {}
-            "Shift" => m.shift = true,
-            "Alt" => m.alt = true,
-            "Ctrl" => m.ctrl = true,
-            k => {
-                key = match k {
-                    ";" => Some(egui::Key::Semicolon),
-                    "'" => Some(egui::Key::Quote),
-                    "," => Some(egui::Key::Comma),
-                    "." => Some(egui::Key::Period),
-                    "/" => Some(egui::Key::Slash),
-                    "\\" => Some(egui::Key::Backslash),
-                    "=" => Some(egui::Key::Equals),
-                    "-" => Some(egui::Key::Minus),
-                    "`" => Some(egui::Key::Backtick),
-                    "[" => Some(egui::Key::OpenBracket),
-                    "]" => Some(egui::Key::CloseBracket),
-                    "Num0" => Some(egui::Key::Num0),
-                    "Num*" => None,
-                    _ => egui::Key::from_name(k),
-                }
-            }
-        }
-    }
-    key.map(|k| (m, k))
-}
-
-/// The key some keyboards report for a shifted punctuation key (`Shift+=` arrives as `+`).
-fn shifted_alias(k: egui::Key) -> Option<egui::Key> {
-    use egui::Key::*;
-    Some(match k {
-        Equals => Plus,
-        Semicolon => Colon,
-        OpenBracket => OpenCurlyBracket,
-        CloseBracket => CloseCurlyBracket,
-        Slash => Questionmark,
-        Backslash => Pipe,
-        _ => return None,
-    })
+    let sc = Trigger::parse(strip_physical(s)).ok()?.chord.to_egui_shortcut()?;
+    Some((sc.modifiers, sc.logical_key))
 }
 
 /// A key binding: modifiers, key, command id and bound params.
 pub type Binding = (egui::Modifiers, egui::Key, String, Value);
 
-/// All bindings of the active keyboard shortcut preset, most modifiers first.
+/// All bindings of the active keyboard shortcut preset, as egui reports their keys.
 pub fn bindings(session: &effectcraft_engine::Session) -> Vec<Binding> {
-    let mut v: Vec<Binding> = Vec::new();
-    for (sc, b) in session.shortcuts().bindings() {
-        if sc.starts_with("Physical+") {
-            continue;
-        }
-        // Off macOS `Cmd` is Ctrl, so a custom Ctrl+Cmd shortcut would
-        // steal the plain Cmd one: such macOS-only shortcuts aren't bound there.
-        if !cfg!(target_os = "macos") && sc.split('+').any(|p| p == "Ctrl") && sc.split('+').any(|p| p == "Cmd") {
-            continue;
-        }
-        if let Some((m, k)) = parse_shortcut(sc) {
-            if m.shift
-                && let Some(alias) = shifted_alias(k)
-            {
-                v.push((m, alias, b.command.clone(), b.params.clone()));
-            }
-            v.push((m, k, b.command.clone(), b.params.clone()));
-        }
-    }
-    v.sort_by_key(|(m, ..)| std::cmp::Reverse(m.command as u8 + m.shift as u8 + m.alt as u8 + m.ctrl as u8));
-    v
+    let egui_keys = |(c, id, params): (Chord, String, Value)| c.to_egui_shortcut().map(|sc| (sc.modifiers, sc.logical_key, id, params));
+    chord_bindings(session).into_iter().filter_map(egui_keys).collect()
 }
 
-fn mods_match(want: egui::Modifiers, got: egui::Modifiers) -> bool {
-    want.command == got.command && want.shift == got.shift && want.alt == got.alt && (want.ctrl == got.ctrl || got.command && cfg!(not(target_os = "macos")))
+fn chord_bindings(session: &effectcraft_engine::Session) -> Vec<(Chord, String, Value)> {
+    let mac = session.shortcuts().platform().is_mac();
+    session
+        .shortcuts()
+        .bindings()
+        .into_iter()
+        .filter(|(sc, _)| !sc.starts_with("Physical+"))
+        .filter_map(|(sc, b)| Some((Trigger::parse(&sc).ok()?.chord, b.command.id.clone(), b.command.params.clone())))
+        // Off macOS `Cmd` is Ctrl, so a custom Ctrl+Cmd shortcut would steal the plain Cmd one.
+        .filter(|(c, ..)| mac || !(c.mods.cmd && c.mods.ctrl))
+        .collect()
 }
 
 /// Whether the `key`+`mods` chord is the current binding of `command` in the active preset
@@ -134,7 +46,8 @@ fn mods_match(want: egui::Modifiers, got: egui::Modifiers) -> bool {
 /// holds the keyboard while the shortcut dispatcher is skipped — follow rebinds).
 /// `Physical+`-only bindings never match here, exactly as for the app-wide dispatcher.
 pub fn chord_matches(session: &effectcraft_engine::Session, command: &str, key: egui::Key, mods: egui::Modifiers) -> bool {
-    bindings(session).into_iter().any(|(m, k, id, _)| id == command && k == key && mods_match(m, mods))
+    let platform = session.shortcuts().platform();
+    chord_bindings(session).iter().any(|(c, id, _)| id == command && craft_keymap::egui::matches(c, key, &mods, platform))
 }
 
 /// Whether a Deselect All or Duplicate chord matched by [`chord_matches`] may run while a text
@@ -219,11 +132,7 @@ pub fn handle_tab_shortcut(app: &mut EffectcraftApp, ctx: &egui::Context) {
 /// Escape with a dialog open: close the popup/picker first, else cancel the dialog.
 fn escape_dialog(app: &mut EffectcraftApp, ctx: &egui::Context) {
     // A popup or colour picker takes Escape first (the picker goes back to its original colour).
-    if crate::panels::shortcut_editor::recording(app)
-        || crate::panels::shortcut_editor::confirming(app)
-        || egui::Popup::is_any_open(ctx)
-        || crate::color_picker::open_recently(ctx)
-    {
+    if crate::panels::shortcut_editor::recording(app) || egui::Popup::is_any_open(ctx) || crate::color_picker::open_recently(ctx) {
         return;
     }
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
@@ -253,7 +162,7 @@ fn escape_dialog(app: &mut EffectcraftApp, ctx: &egui::Context) {
 /// Escape with a dialog open: it is Cancel. Escape while recording a shortcut cancels the
 /// recording, not the editor; so does Escape in its Delete Preset prompt.
 fn cancel_dialog(app: &mut EffectcraftApp, ctx: &egui::Context) {
-    if crate::panels::shortcut_editor::recording(app) || crate::panels::shortcut_editor::confirming(app) {
+    if crate::panels::shortcut_editor::recording(app) {
         return;
     }
     if app.dialog == Some(crate::Dialog::Info) {
@@ -327,7 +236,13 @@ fn numpad_star_marker(app: &mut EffectcraftApp, ctx: &egui::Context) {
     if !ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Text(t) if t == "*"))) {
         return;
     }
-    let bound = app.session.shortcuts().bindings().into_iter().find(|(k, _)| *k == "Num*").map(|(_, b)| (b.command.clone(), b.params.clone()));
+    let bound = app
+        .session
+        .shortcuts()
+        .bindings()
+        .into_iter()
+        .find(|(k, _)| Trigger::parse(k).is_ok_and(|t| t.chord.key == Key::KeypadMultiply))
+        .map(|(_, b)| (b.command.id.clone(), b.command.params.clone()));
     // As in After Effects, it marks the selected layers; only with none selected does it add
     // a composition marker (#976).
     let bound =
@@ -378,7 +293,7 @@ fn handle_shortcuts_impl(app: &mut EffectcraftApp, ctx: &egui::Context, tab_only
     if events.is_empty() {
         return;
     }
-    let binds = bindings(&app.session);
+    let binds = chord_bindings(&app.session);
     for (key, mods, pressed, physical_key) in events {
         // (Per event: a shortcut can change the tool, the selection or the focused panel.)
         let (focused, contexts) = (app.ui.focused.shortcut_scope(), active_contexts(app));
@@ -435,11 +350,16 @@ fn handle_shortcuts_impl(app: &mut EffectcraftApp, ctx: &egui::Context, tab_only
             let key = effectcraft_engine::shortcuts::binding_key(id, params);
             table.find(&key).map_or(effectcraft_engine::shortcuts::APP_SCOPE, |b| b.scope.as_str())
         };
+        let platform = table.platform();
         let physical = table.bindings().into_iter().filter_map(|(sc, b)| {
-            let (m, k) = parse_shortcut(sc.strip_prefix("Physical+")?)?;
-            (Some(k) == physical_key && mods_match(m, mods)).then_some((b.scope.as_str(), true, (&b.command, &b.params)))
+            let chord = Trigger::parse(sc.strip_prefix("Physical+")?).ok()?.chord;
+            let same = physical_key.and_then(Key::from_egui) == Some(chord.key) && Mods::from_egui(&mods, platform) == chord.mods;
+            same.then_some((b.scope.as_str(), true, (&b.command.id, &b.command.params)))
         });
-        let logical = binds.iter().filter(|(m, k, ..)| *k == key && mods_match(*m, mods)).map(|(_, _, id, params)| (scope_of(id, params), false, (id, params)));
+        let logical = binds
+            .iter()
+            .filter(|(c, ..)| craft_keymap::egui::matches(c, key, &mods, platform))
+            .map(|(_, id, params)| (scope_of(id, params), false, (id, params)));
         let chosen = match effectcraft_engine::shortcuts::pick(physical.chain(logical), &focused, &contexts) {
             Ok(c) => c.map(|(id, params)| (id.clone(), if params.is_null() { json!({}) } else { params.clone() })),
             Err(scopes) => {

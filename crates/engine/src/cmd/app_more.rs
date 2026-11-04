@@ -308,12 +308,15 @@ fn reassign(s: &mut Session, key: &str, slot: &str, cmd: &str) -> Result<Value> 
     let t = s.shortcuts();
     let b = t.find(key).cloned().ok_or_else(|| bad(cmd, format!("`{key}` can't have a shortcut")))?;
     let holders: Vec<(crate::shortcuts::Bindable, Vec<String>)> = t
-        .bindables
+        .catalog()
         .iter()
-        .filter(|x| x.key != key && t.keys.get(&x.key).is_some_and(|k| k.iter().any(|k| k == slot)))
-        .map(|x| (x.clone(), t.keys.get(&x.key).cloned().unwrap_or_default()))
+        .filter_map(|x| {
+            let xk = x.command.key();
+            let k = t.keys_of(&xk);
+            (xk != key && k.iter().any(|k| k == slot)).then(|| (x.clone(), k))
+        })
         .collect();
-    let mine = t.keys.get(key).cloned().unwrap_or_default();
+    let mine = t.keys_of(key);
     let replaced: Vec<String> = holders.iter().map(|(h, _)| h.label.clone()).collect();
     for (h, keys) in &holders {
         let rest: Vec<String> = keys.iter().filter(|k| *k != slot).cloned().collect();
@@ -326,7 +329,7 @@ fn reassign(s: &mut Session, key: &str, slot: &str, cmd: &str) -> Result<Value> 
     if let Some(n) = &created {
         s.toast(format!("The default shortcuts can't be changed: created the preset \"{n}\""));
     }
-    Ok(json!({"command": key, "keys": keys, "replaced": replaced, "preset": s.keymaps.active}))
+    Ok(json!({"command": key, "keys": keys, "replaced": replaced, "preset": s.keymaps.active_name()}))
 }
 
 /// The command id of a 3D view.

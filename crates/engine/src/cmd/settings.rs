@@ -108,10 +108,11 @@ fn sc_list(s: &mut Session, p: &Value) -> Result<Value> {
     let keys_q = str_p(p, "keys").and_then(normalize);
     let t = s.shortcuts();
     let rows: Vec<Value> = t
-        .bindables
+        .catalog()
         .iter()
         .filter_map(|b| {
-            let keys = t.keys.get(&b.key).cloned().unwrap_or_default();
+            let key = b.command.key();
+            let keys = t.keys_of(&key);
             if assigned && keys.is_empty() {
                 return None;
             }
@@ -120,16 +121,25 @@ fn sc_list(s: &mut Session, p: &Value) -> Result<Value> {
             {
                 return None;
             }
-            let hay = format!("{} {} {} {}", b.label, b.command, b.path.join(" "), keys.join(" ")).to_lowercase();
+            let path = b.paths.first().cloned().unwrap_or_default();
+            let hay = format!("{} {} {} {}", b.label, b.command.id, path.join(" "), keys.join(" ")).to_lowercase();
             if !q.split_whitespace().all(|w| hay.contains(w)) {
                 return None;
             }
-            let mut o = serde_json::to_value(b).unwrap_or_default();
-            o["keys"] = json!(keys);
-            Some(o)
+            let defaults: Vec<String> = b.defaults.iter().map(ToString::to_string).collect();
+            Some(json!({
+                "key": key,
+                "command": b.command.id,
+                "params": b.command.params,
+                "label": b.label,
+                "path": path,
+                "scope": b.scope.as_str(),
+                "defaults": defaults,
+                "keys": keys,
+            }))
         })
         .collect();
-    Ok(json!({"preset": s.keymaps.active, "presets": s.keymaps.names(), "count": rows.len(), "commands": rows}))
+    Ok(json!({"preset": s.keymaps.active_name(), "presets": s.keymaps.names(), "count": rows.len(), "commands": rows}))
 }
 
 fn sc_set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -138,7 +148,8 @@ fn sc_set(s: &mut Session, p: &Value) -> Result<Value> {
     let conflicts: Vec<_> = keys.iter().flat_map(|k| s.shortcuts().conflicts(&b, k)).collect();
     let created = s.keymaps.set(&b, &keys).map_err(|e| bad("shortcuts.set", e))?;
     s.shortcuts_changed();
-    let now = s.shortcuts().keys.get(&b.key).cloned().unwrap_or_default();
+    let key = b.command.key();
+    let now = s.shortcuts().keys_of(&key);
     if let Some(n) = &created {
         s.toast(format!("The default shortcuts can't be changed: created the preset \"{n}\""));
     }
@@ -146,20 +157,20 @@ fn sc_set(s: &mut Session, p: &Value) -> Result<Value> {
         let names: Vec<String> = conflicts.iter().map(|c| format!("{} ({})", c.label, c.keys)).collect();
         s.toast(format!("Shortcut conflict: also used by {}", names.join(", ")));
     }
-    Ok(json!({"command": b.key, "keys": now, "preset": s.keymaps.active, "created": created, "conflicts": conflicts}))
+    Ok(json!({"command": key, "keys": now, "preset": s.keymaps.active_name(), "created": created, "conflicts": conflicts}))
 }
 
 fn sc_reset(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(c) = str_p(p, "command") {
         let b = bindable(s, p, "shortcuts.reset")?;
-        let defaults = b.defaults.clone();
+        let defaults: Vec<String> = b.defaults.iter().map(ToString::to_string).collect();
         s.keymaps.set(&b, &defaults).map_err(|e| bad("shortcuts.reset", e))?;
         s.shortcuts_changed();
         return Ok(json!({"command": c, "keys": defaults}));
     }
     s.keymaps.reset_active();
     s.shortcuts_changed();
-    Ok(json!({"preset": s.keymaps.active}))
+    Ok(json!({"preset": s.keymaps.active_name()}))
 }
 
 fn sc_preset(s: &mut Session, p: &Value) -> Result<Value> {
@@ -167,28 +178,29 @@ fn sc_preset(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_p(p, "name");
     let e = |m: String| bad("shortcuts.preset", m);
     let k = &mut s.keymaps;
+    let active = k.active_name().to_string();
     match op {
         "select" => k.select(name.unwrap_or(DEFAULT_PRESET)).map_err(e)?,
         "new" => {
             k.duplicate(DEFAULT_PRESET, Some(name.unwrap_or("Custom"))).map_err(e)?;
         }
         "duplicate" => {
-            let from = str_p(p, "from").map(str::to_string).unwrap_or_else(|| k.active.clone());
-            k.duplicate(&from, name).map_err(e)?;
+            let from = str_p(p, "from").unwrap_or(&active);
+            k.duplicate(from, name).map_err(e)?;
         }
         "delete" => {
-            let n = name.map(str::to_string).unwrap_or_else(|| k.active.clone());
-            k.delete(&n).map_err(e)?;
+            let n = name.unwrap_or(&active);
+            k.delete(n).map_err(e)?;
         }
         "rename" => {
             let to = str_p(p, "newName").ok_or_else(|| bad("shortcuts.preset", "missing `newName`"))?;
-            let from = name.map(str::to_string).unwrap_or_else(|| k.active.clone());
-            k.rename(&from, to).map_err(e)?;
+            let from = name.unwrap_or(&active);
+            k.rename(from, to).map_err(e)?;
         }
         _ => return Err(bad("shortcuts.preset", "op must be select, new, duplicate, delete or rename")),
     }
     s.shortcuts_changed();
-    Ok(json!({"preset": s.keymaps.active, "presets": s.keymaps.names()}))
+    Ok(json!({"preset": s.keymaps.active_name(), "presets": s.keymaps.names()}))
 }
 
 fn sc_export(s: &mut Session, p: &Value) -> Result<Value> {

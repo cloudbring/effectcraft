@@ -114,7 +114,10 @@ pollster = "1"
 # ui
 # Shared frontend components; keep this dependency above the engine boundary.
 # Shared UI and the complete egui family select reviewed immutable commits below.
-craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0", features = ["serde"] }
+# TODO: repoint to storytold/craft-libs after upstream merge
+craft-ui = { version = "0.1.0", git = "https://github.com/cloudbring/craft-libs", branch = "algo/integration", features = ["serde"] }
+# TODO: repoint to storytold/craft-libs after upstream merge
+craft-keymap = { git = "https://github.com/cloudbring/craft-libs", branch = "algo/integration", features = ["egui", "ui"] }
 # `default_fonts` and `monochrome_emoji_fonts` are explicit: the app's `FontDefinitions::default()`
 # and its `✔`/`▣` chrome glyphs need both, and kittest's own dev-dependencies do not propagate.
 egui = { version = "0.37", default-features = false, features = ["default_fonts", "monochrome_emoji_fonts"] }

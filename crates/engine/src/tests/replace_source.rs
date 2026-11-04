@@ -153,6 +153,6 @@ fn replace_source_uses_the_project_selection_and_skips_locked_layers() {
 /// After Effects' Ctrl+Alt+/ default (Cmd+Alt+/ in EffectCraft's shortcut syntax).
 #[test]
 fn replace_source_is_bound_to_ctrl_alt_slash() {
-    let b = crate::shortcuts::bindables(&[]).into_iter().find(|b| b.command == "layer.replaceSource").expect("layer.replaceSource is bindable");
-    assert!(b.defaults.iter().any(|d| d == "Cmd+Alt+/"), "{:?}", b.defaults);
+    let b = crate::shortcuts::bindables(&[]).into_iter().find(|b| b.command.id == "layer.replaceSource").expect("layer.replaceSource is bindable");
+    assert!(b.defaults.iter().any(|d| d.to_string() == "Cmd+Alt+/"), "{:?}", b.defaults);
 }

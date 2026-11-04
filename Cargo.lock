@@ -1107,12 +1107,12 @@ dependencies = [
 [[package]]
 name = "craft-fonts-build"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13afff77f38b5c11b73aa0#92d392cff132eaf53e13afff77f38b5c11b73aa0"
+source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#5ac933bbe92d82a587a5c48ce135fa1d4d14b423"
 
 [[package]]
 name = "craft-i18n"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13afff77f38b5c11b73aa0#92d392cff132eaf53e13afff77f38b5c11b73aa0"
+source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#5ac933bbe92d82a587a5c48ce135fa1d4d14b423"
 dependencies = [
  "fixed_decimal",
  "icu_decimal",
@@ -1130,6 +1130,18 @@ dependencies = [
  "unicode-bidi",
  "windows-registry",
  "writeable",
+]
+
+[[package]]
+name = "craft-keymap"
+version = "0.1.0"
+source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#5ac933bbe92d82a587a5c48ce135fa1d4d14b423"
+dependencies = [
+ "craft-i18n",
+ "craft-ui",
+ "egui",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1155,7 +1167,7 @@ dependencies = [
 [[package]]
 name = "craft-ui"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13afff77f38b5c11b73aa0#92d392cff132eaf53e13afff77f38b5c11b73aa0"
+source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#5ac933bbe92d82a587a5c48ce135fa1d4d14b423"
 dependencies = [
  "craft-fonts-build",
  "craft-i18n",
@@ -1507,6 +1519,7 @@ version = "0.21.0"
 dependencies = [
  "chrono",
  "craft-docpath",
+ "craft-keymap",
  "effectcraft-color",
  "effectcraft-effects",
  "effectcraft-geom",
@@ -1932,6 +1945,7 @@ name = "effectcraft-ui-egui"
 version = "0.21.0"
 dependencies = [
  "chrono",
+ "craft-keymap",
  "craft-quit",
  "craft-ui",
  "craft-update",
