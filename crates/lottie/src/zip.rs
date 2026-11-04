@@ -35,9 +35,9 @@ pub fn read_stored(data: &[u8]) -> Vec<(String, Vec<u8>)> {
     let names = reader.names().to_vec();
     let mut entries = Vec::new();
     for name in names {
-        match reader.read(&name) {
-            Ok(Some(bytes)) => entries.push((name, bytes)),
-            Ok(None) | Err(_) => return Vec::new(),
+        // A bad entry (CRC, size or limit failure) is skipped; the readable ones are kept.
+        if let Ok(Some(bytes)) = reader.read(&name) {
+            entries.push((name, bytes));
         }
     }
     entries
@@ -80,6 +80,18 @@ mod tests {
     fn deflated_dotlottie_entries_are_accepted() -> Result<(), Box<dyn std::error::Error>> {
         let bytes = zip(&[("animations/main.json", b"{}")], CompressionMethod::Deflated)?;
         assert_eq!(super::read_stored(&bytes), [("animations/main.json".to_string(), b"{}".to_vec())]);
+        Ok(())
+    }
+
+    #[test]
+    fn corrupt_entry_is_skipped_and_readable_entries_are_kept() -> Result<(), Box<dyn std::error::Error>> {
+        let entries = [("a.json".to_string(), b"AAAA".to_vec()), ("bad.bin".to_string(), b"BBBB".to_vec()), ("c.json".to_string(), b"CCCC".to_vec())];
+        let mut bytes = super::store(&entries);
+        // Flip one payload byte of the middle entry so its CRC no longer matches.
+        let offset = bytes.windows(4).position(|window| window == b"BBBB").ok_or("missing payload")?;
+        bytes[offset] ^= 0xFF;
+        let expected = [entries[0].clone(), entries[2].clone()];
+        assert_eq!(super::read_stored(&bytes), expected);
         Ok(())
     }
 
