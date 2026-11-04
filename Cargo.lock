@@ -1110,9 +1110,37 @@ version = "0.1.0"
 source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#5ac933bbe92d82a587a5c48ce135fa1d4d14b423"
 
 [[package]]
+name = "craft-fonts-build"
+version = "0.1.0"
+source = "git+https://github.com/cloudbring/craft-libs?rev=93f2120a3a5584fb1b1305388c7facc1488aa13e#93f2120a3a5584fb1b1305388c7facc1488aa13e"
+
+[[package]]
 name = "craft-i18n"
 version = "0.1.0"
 source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#5ac933bbe92d82a587a5c48ce135fa1d4d14b423"
+dependencies = [
+ "fixed_decimal",
+ "icu_decimal",
+ "icu_locale_core",
+ "icu_locale_fallback",
+ "icu_normalizer",
+ "icu_plurals",
+ "icu_properties",
+ "icu_provider",
+ "icu_provider_adapters",
+ "icu_provider_blob",
+ "log",
+ "objc2-foundation 0.3.2",
+ "sys-locale",
+ "unicode-bidi",
+ "windows-registry",
+ "writeable",
+]
+
+[[package]]
+name = "craft-i18n"
+version = "0.1.0"
+source = "git+https://github.com/cloudbring/craft-libs?rev=93f2120a3a5584fb1b1305388c7facc1488aa13e#93f2120a3a5584fb1b1305388c7facc1488aa13e"
 dependencies = [
  "fixed_decimal",
  "icu_decimal",
@@ -1137,8 +1165,8 @@ name = "craft-keymap"
 version = "0.1.0"
 source = "git+https://github.com/cloudbring/craft-libs?rev=93f2120a3a5584fb1b1305388c7facc1488aa13e#93f2120a3a5584fb1b1305388c7facc1488aa13e"
 dependencies = [
- "craft-i18n",
- "craft-ui",
+ "craft-i18n 0.1.0 (git+https://github.com/cloudbring/craft-libs?rev=93f2120a3a5584fb1b1305388c7facc1488aa13e)",
+ "craft-ui 0.1.0 (git+https://github.com/cloudbring/craft-libs?rev=93f2120a3a5584fb1b1305388c7facc1488aa13e)",
  "egui",
  "serde",
  "serde_json",
@@ -1169,8 +1197,8 @@ name = "craft-ui"
 version = "0.1.0"
 source = "git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration#5ac933bbe92d82a587a5c48ce135fa1d4d14b423"
 dependencies = [
- "craft-fonts-build",
- "craft-i18n",
+ "craft-fonts-build 0.1.0 (git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration)",
+ "craft-i18n 0.1.0 (git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration)",
  "egui",
  "epaint",
  "js-sys",
@@ -1179,6 +1207,26 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "serde",
+ "skrifa",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "craft-ui"
+version = "0.1.0"
+source = "git+https://github.com/cloudbring/craft-libs?rev=93f2120a3a5584fb1b1305388c7facc1488aa13e#93f2120a3a5584fb1b1305388c7facc1488aa13e"
+dependencies = [
+ "craft-fonts-build 0.1.0 (git+https://github.com/cloudbring/craft-libs?rev=93f2120a3a5584fb1b1305388c7facc1488aa13e)",
+ "craft-i18n 0.1.0 (git+https://github.com/cloudbring/craft-libs?rev=93f2120a3a5584fb1b1305388c7facc1488aa13e)",
+ "egui",
+ "epaint",
+ "js-sys",
+ "log",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "skrifa",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -2241,7 +2289,7 @@ dependencies = [
  "chrono",
  "craft-keymap",
  "craft-quit",
- "craft-ui",
+ "craft-ui 0.1.0 (git+https://github.com/cloudbring/craft-libs?branch=algo%2Fintegration)",
  "craft-update",
  "effectcraft-color 0.21.0",
  "effectcraft-engine 0.21.0",
